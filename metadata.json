@@ -1,0 +1,6 @@
+{
+  "name": "Inject Care TCMS",
+  "description": "Trade Compliance Management System for Inject Care Parenterals Pvt. Ltd. to manage Advance Authorisation licences, imports, export obligations, exports and documentation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

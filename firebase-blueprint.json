@@ -1,0 +1,144 @@
+{
+  "entities": {
+    "licence": {
+      "title": "Licence",
+      "description": "DGFT Advance Authorisation Licence record with validity dates and status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "licence_number": { "type": "string" },
+        "issue_date": { "type": "string" },
+        "import_validity_date": { "type": "string" },
+        "export_validity_date": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Fulfilled", "Redeemed", "Expired"] },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["licence_number", "issue_date", "import_validity_date", "export_validity_date", "status"]
+    },
+    "licence_product": {
+      "title": "LicenceProduct",
+      "description": "Import item / input material authorized under the advance licence",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "licence_id": { "type": "string" },
+        "product_name": { "type": "string" },
+        "product_type": { "type": "string" },
+        "approved_quantity": { "type": "number" },
+        "unit": { "type": "string" },
+        "wastage_percentage": { "type": "number" },
+        "net_obligation_quantity": { "type": "number" },
+        "conversion_ratio": { "type": "number" },
+        "obligation_period_months": { "type": "number" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["licence_id", "product_name", "approved_quantity", "unit"]
+    },
+    "import_record": {
+      "title": "ImportRecord",
+      "description": "Customs import entry utilizing the advance authorisation licence",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "licence_id": { "type": "string" },
+        "licence_product_id": { "type": "string" },
+        "import_date": { "type": "string" },
+        "invoice_number": { "type": "string" },
+        "supplier": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string" },
+        "bill_of_entry_number": { "type": "string" },
+        "remarks": { "type": "string" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["licence_id", "licence_product_id", "import_date", "invoice_number", "supplier", "quantity", "unit", "bill_of_entry_number"]
+    },
+    "export_obligation": {
+      "title": "ExportObligation",
+      "description": "Export obligation generated automatically from an import based on SION norms",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "licence_id": { "type": "string" },
+        "import_id": { "type": "string" },
+        "licence_product_id": { "type": "string" },
+        "required_quantity": { "type": "number" },
+        "completed_quantity": { "type": "number" },
+        "pending_quantity": { "type": "number" },
+        "due_date": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Partially Fulfilled", "Fulfilled", "Overdue"] },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["licence_id", "import_id", "required_quantity", "completed_quantity", "pending_quantity", "due_date", "status"]
+    },
+    "export_record": {
+      "title": "ExportRecord",
+      "description": "Export shipping transaction fulfilling an export obligation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "licence_id": { "type": "string" },
+        "obligation_id": { "type": "string" },
+        "export_date": { "type": "string" },
+        "invoice_number": { "type": "string" },
+        "export_type": { "type": "string", "enum": ["Direct Export", "Third-Party Export"] },
+        "party_name": { "type": "string" },
+        "product": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string" },
+        "shipping_bill_number": { "type": "string" },
+        "remarks": { "type": "string" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["licence_id", "obligation_id", "export_date", "invoice_number", "export_type", "party_name", "product", "quantity", "unit", "shipping_bill_number"]
+    },
+    "document": {
+      "title": "Document",
+      "description": "Compliance document metadata tracking PDFs stored in Google Drive",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "licence_id": { "type": "string" },
+        "import_id": { "type": "string" },
+        "export_id": { "type": "string" },
+        "document_type": { "type": "string" },
+        "file_name": { "type": "string" },
+        "storage_path": { "type": "string" },
+        "drive_file_id": { "type": "string" },
+        "mime_type": { "type": "string" },
+        "file_size": { "type": "number" },
+        "uploaded_by": { "type": "string" },
+        "uploaded_at": { "type": "string" }
+      },
+      "required": ["document_type", "file_name", "storage_path", "uploaded_at"]
+    }
+  },
+  "firestore": {
+    "/licences/{licenceId}": {
+      "schema": "licence",
+      "description": "Collection of advance authorisation licences"
+    },
+    "/licence_products/{productId}": {
+      "schema": "licence_product",
+      "description": "Collection of authorized import items under licences"
+    },
+    "/imports/{importId}": {
+      "schema": "import_record",
+      "description": "Collection of customs import transactions"
+    },
+    "/export_obligations/{obligationId}": {
+      "schema": "export_obligation",
+      "description": "Collection of tracked export obligations"
+    },
+    "/exports/{exportId}": {
+      "schema": "export_record",
+      "description": "Collection of export fulfillment transactions"
+    },
+    "/documents/{documentId}": {
+      "schema": "document",
+      "description": "Collection of compliance document records linked to Google Drive files"
+    }
+  }
+}
