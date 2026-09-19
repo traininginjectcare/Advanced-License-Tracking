@@ -13,6 +13,7 @@ export type DocumentType =
   | 'Shipping Bill' 
   | 'BRC' 
   | 'NOC' 
+  | 'DEEC Declaration'
   | 'Other';
 
 export interface LicenceProduct {
@@ -23,6 +24,7 @@ export interface LicenceProduct {
   approved_quantity: number;
   unit: string;
   wastage_percentage: number;
+  gross_obligation_quantity?: number;
   net_obligation_quantity: number;
   conversion_ratio: number;
   obligation_period_months?: number;
@@ -42,17 +44,25 @@ export interface Licence {
   products?: LicenceProduct[];
 }
 
+export interface ImportProductItem {
+  licence_product_id: string;
+  product_name: string;
+  quantity: number;
+  unit: string;
+}
+
 export interface ImportRecord {
   id: string;
   licence_id: string;
-  licence_product_id: string;
+  licence_product_id?: string;
   import_date: string;
   invoice_number: string;
   supplier: string;
   quantity: number;
   unit: string;
-  bill_of_entry_number: string;
+  bill_of_entry_number?: string;
   remarks?: string;
+  items?: ImportProductItem[];
   created_at: string;
   // Joined fields
   licence_number?: string;
@@ -82,10 +92,24 @@ export interface ExportObligation {
   days_remaining?: number;
 }
 
+export interface ExportBatchItem {
+  batch_number: string;
+  quantity: number;
+}
+
+export interface ExportProductItem {
+  product: string;
+  quantity: number;
+  unit: string;
+  gross_quantity?: number;
+  net_quantity?: number;
+  batches?: ExportBatchItem[];
+}
+
 export interface ExportRecord {
   id: string;
   licence_id: string;
-  obligation_id: string;
+  obligation_id?: string;
   export_date: string;
   invoice_number: string;
   export_type: ExportType;
@@ -93,8 +117,12 @@ export interface ExportRecord {
   product: string;
   quantity: number;
   unit: string;
-  shipping_bill_number: string;
+  gross_quantity?: number;
+  net_quantity?: number;
+  shipping_bill_number?: string;
   remarks?: string;
+  items?: ExportProductItem[];
+  batches?: ExportBatchItem[];
   created_at: string;
   // Joined fields
   licence_number?: string;

@@ -356,12 +356,18 @@ class DatabaseService {
 
     return imports.map(imp => {
       const lic = this.localDb.licences.find(l => l.id === imp.licence_id);
-      const prod = this.localDb.licence_products.find(p => p.id === imp.licence_product_id);
+      let prodName = 'Unknown';
+      if (imp.items && imp.items.length > 0) {
+        prodName = imp.items.map(it => `${it.product_name} (${it.quantity} ${it.unit})`).join(', ');
+      } else {
+        const prod = this.localDb.licence_products.find(p => p.id === imp.licence_product_id);
+        prodName = prod?.product_name || 'Unknown';
+      }
       const docs = this.localDb.documents.filter(d => d.import_id === imp.id);
       return {
         ...imp,
         licence_number: lic?.licence_number || 'Unknown',
-        product_name: prod?.product_name || 'Unknown',
+        product_name: prodName,
         documents: docs
       };
     }).sort((a, b) => new Date(b.import_date).getTime() - new Date(a.import_date).getTime());
@@ -369,8 +375,8 @@ class DatabaseService {
 
   public async createImport(
     data: Omit<ImportRecord, 'id' | 'created_at'>,
-    obligationDueDate: string,
-    obligationRequiredQty: number
+    obligationDueDateOrList: string | Array<{ dueDate: string; requiredQuantity: number; productId?: string }>,
+    legacyRequiredQty?: number
   ): Promise<{ importRecord: ImportRecord; obligation: ExportObligation }> {
     const importId = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -378,50 +384,78 @@ class DatabaseService {
     const newImport: ImportRecord = {
       id: importId,
       licence_id: data.licence_id,
-      licence_product_id: data.licence_product_id,
+      licence_product_id: data.licence_product_id || '',
       import_date: data.import_date,
       invoice_number: data.invoice_number.trim(),
       supplier: data.supplier.trim(),
       quantity: Number(data.quantity),
       unit: data.unit,
-      bill_of_entry_number: data.bill_of_entry_number.trim(),
+      bill_of_entry_number: data.bill_of_entry_number ? data.bill_of_entry_number.trim() : '',
       remarks: data.remarks || '',
+      items: data.items,
       created_at: now
     };
 
-    const obligationId = crypto.randomUUID();
-    const newObligation: ExportObligation = {
-      id: obligationId,
-      licence_id: data.licence_id,
-      import_id: importId,
-      required_quantity: Number(obligationRequiredQty.toFixed(2)),
-      completed_quantity: 0,
-      pending_quantity: Number(obligationRequiredQty.toFixed(2)),
-      due_date: obligationDueDate,
-      status: 'Pending',
-      created_at: now,
-      updated_at: now
-    };
+    const createdObligations: ExportObligation[] = [];
+
+    if (Array.isArray(obligationDueDateOrList)) {
+      for (const obSpec of obligationDueDateOrList) {
+        const obligationId = crypto.randomUUID();
+        const newObligation: ExportObligation = {
+          id: obligationId,
+          licence_id: data.licence_id,
+          import_id: importId,
+          required_quantity: Number(obSpec.requiredQuantity.toFixed(2)),
+          completed_quantity: 0,
+          pending_quantity: Number(obSpec.requiredQuantity.toFixed(2)),
+          due_date: obSpec.dueDate,
+          status: 'Pending',
+          created_at: now,
+          updated_at: now
+        };
+        createdObligations.push(newObligation);
+      }
+    } else {
+      const obligationId = crypto.randomUUID();
+      const qty = legacyRequiredQty || 0;
+      const newObligation: ExportObligation = {
+        id: obligationId,
+        licence_id: data.licence_id,
+        import_id: importId,
+        required_quantity: Number(qty.toFixed(2)),
+        completed_quantity: 0,
+        pending_quantity: Number(qty.toFixed(2)),
+        due_date: obligationDueDateOrList,
+        status: 'Pending',
+        created_at: now,
+        updated_at: now
+      };
+      createdObligations.push(newObligation);
+    }
 
     if (this.firestore) {
       try {
         await setDoc(doc(this.firestore, 'imports', importId), newImport);
-        await setDoc(doc(this.firestore, 'export_obligations', obligationId), newObligation);
+        for (const ob of createdObligations) {
+          await setDoc(doc(this.firestore, 'export_obligations', ob.id), ob);
+        }
       } catch (e: any) {
         console.warn('Firestore createImport error:', e.message);
       }
     }
 
     this.localDb.imports.unshift(newImport);
-    this.localDb.export_obligations.unshift(newObligation);
+    for (const ob of createdObligations) {
+      this.localDb.export_obligations.unshift(ob);
+    }
     this.saveLocalDb();
 
-    return { importRecord: newImport, obligation: newObligation };
+    return { importRecord: newImport, obligation: createdObligations[0] };
   }
 
   public async deleteImport(id: string): Promise<boolean> {
-    const ob = this.localDb.export_obligations.find(o => o.import_id === id);
-    if (ob) {
+    const linkedObs = this.localDb.export_obligations.filter(o => o.import_id === id);
+    for (const ob of linkedObs) {
       const hasExports = this.localDb.exports.some(e => e.obligation_id === ob.id);
       if (hasExports) {
         throw new Error('Cannot delete import because export fulfillments have already been logged against its obligation.');
@@ -431,7 +465,7 @@ class DatabaseService {
     if (this.firestore) {
       try {
         await deleteDoc(doc(this.firestore, 'imports', id));
-        if (ob) {
+        for (const ob of linkedObs) {
           await deleteDoc(doc(this.firestore, 'export_obligations', ob.id));
         }
         const docs = this.localDb.documents.filter(d => d.import_id === id);
@@ -502,43 +536,28 @@ class DatabaseService {
 
     return exports.map(exp => {
       const lic = this.localDb.licences.find(l => l.id === exp.licence_id);
-      const ob = this.localDb.export_obligations.find(o => o.id === exp.obligation_id);
+      const ob = exp.obligation_id ? this.localDb.export_obligations.find(o => o.id === exp.obligation_id) : undefined;
       const imp = ob ? this.localDb.imports.find(i => i.id === ob.import_id) : undefined;
       const docs = this.localDb.documents.filter(d => d.export_id === exp.id);
 
       return {
         ...exp,
         licence_number: lic?.licence_number || 'Unknown',
-        import_invoice_number: imp?.invoice_number || 'Unknown',
+        import_invoice_number: imp?.invoice_number || '-',
         documents: docs
       };
     }).sort((a, b) => new Date(b.export_date).getTime() - new Date(a.export_date).getTime());
   }
 
   public async createExport(data: Omit<ExportRecord, 'id' | 'created_at'>): Promise<ExportRecord> {
-    const ob = this.localDb.export_obligations.find(o => o.id === data.obligation_id);
-    if (!ob) {
-      throw new Error('Associated export obligation not found.');
-    }
-
     const exportQty = Number(data.quantity);
-    const newCompleted = (Number(ob.completed_quantity) || 0) + exportQty;
-    const newPending = Math.max(0, ob.required_quantity - newCompleted);
-
-    let newStatus = ob.status;
-    if (newCompleted >= ob.required_quantity) {
-      newStatus = 'Completed';
-    } else if (newCompleted > 0) {
-      newStatus = new Date(ob.due_date).getTime() < Date.now() ? 'Overdue' : 'Partially Fulfilled';
-    }
-
     const exportId = crypto.randomUUID();
     const now = new Date().toISOString();
 
     const newExport: ExportRecord = {
       id: exportId,
       licence_id: data.licence_id,
-      obligation_id: data.obligation_id,
+      obligation_id: data.obligation_id || '',
       export_date: data.export_date,
       invoice_number: data.invoice_number.trim(),
       export_type: data.export_type,
@@ -546,25 +565,68 @@ class DatabaseService {
       product: data.product.trim(),
       quantity: exportQty,
       unit: data.unit,
-      shipping_bill_number: data.shipping_bill_number.trim(),
+      gross_quantity: data.gross_quantity,
+      net_quantity: data.net_quantity,
+      shipping_bill_number: data.shipping_bill_number ? data.shipping_bill_number.trim() : '',
       remarks: data.remarks || '',
+      items: data.items,
+      batches: data.batches,
       created_at: now
     };
 
-    ob.completed_quantity = Number(newCompleted.toFixed(2));
-    ob.pending_quantity = Number(newPending.toFixed(2));
-    ob.status = newStatus;
-    ob.updated_at = now;
+    const updatedObs: ExportObligation[] = [];
+
+    if (data.obligation_id) {
+      const ob = this.localDb.export_obligations.find(o => o.id === data.obligation_id);
+      if (ob) {
+        const newCompleted = (Number(ob.completed_quantity) || 0) + exportQty;
+        const newPending = Math.max(0, ob.required_quantity - newCompleted);
+        let newStatus = ob.status;
+        if (newCompleted >= ob.required_quantity) {
+          newStatus = 'Completed';
+        } else if (newCompleted > 0) {
+          newStatus = new Date(ob.due_date).getTime() < Date.now() ? 'Overdue' : 'Partially Fulfilled';
+        }
+        ob.completed_quantity = Number(newCompleted.toFixed(2));
+        ob.pending_quantity = Number(newPending.toFixed(2));
+        ob.status = newStatus;
+        ob.updated_at = now;
+        updatedObs.push(ob);
+      }
+    } else {
+      // Unlinked export: fulfill licence's pending obligations in FIFO order (by earliest due date)
+      let remainingToFulfill = exportQty;
+      const licenceObs = this.localDb.export_obligations
+        .filter(o => o.licence_id === data.licence_id && o.pending_quantity > 0)
+        .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime());
+
+      for (const ob of licenceObs) {
+        if (remainingToFulfill <= 0) break;
+        const fulfillAmt = Math.min(ob.pending_quantity, remainingToFulfill);
+        ob.completed_quantity = Number(((ob.completed_quantity || 0) + fulfillAmt).toFixed(2));
+        ob.pending_quantity = Number(Math.max(0, ob.required_quantity - ob.completed_quantity).toFixed(2));
+        if (ob.completed_quantity >= ob.required_quantity) {
+          ob.status = 'Completed';
+        } else if (ob.completed_quantity > 0) {
+          ob.status = new Date(ob.due_date).getTime() < Date.now() ? 'Overdue' : 'Partially Fulfilled';
+        }
+        ob.updated_at = now;
+        remainingToFulfill -= fulfillAmt;
+        updatedObs.push(ob);
+      }
+    }
 
     if (this.firestore) {
       try {
         await setDoc(doc(this.firestore, 'exports', exportId), newExport);
-        await updateDoc(doc(this.firestore, 'export_obligations', ob.id), {
-          completed_quantity: ob.completed_quantity,
-          pending_quantity: ob.pending_quantity,
-          status: ob.status,
-          updated_at: now
-        });
+        for (const ob of updatedObs) {
+          await updateDoc(doc(this.firestore, 'export_obligations', ob.id), {
+            completed_quantity: ob.completed_quantity,
+            pending_quantity: ob.pending_quantity,
+            status: ob.status,
+            updated_at: now
+          });
+        }
       } catch (e: any) {
         console.warn('Firestore createExport error:', e.message);
       }
@@ -580,27 +642,62 @@ class DatabaseService {
     const exp = this.localDb.exports.find(e => e.id === id);
     if (!exp) return false;
 
-    const ob = this.localDb.export_obligations.find(o => o.id === exp.obligation_id);
-    if (ob) {
-      ob.completed_quantity = Math.max(0, ob.completed_quantity - exp.quantity);
-      ob.pending_quantity = Math.max(0, ob.required_quantity - ob.completed_quantity);
-      ob.status = ob.completed_quantity >= ob.required_quantity 
-        ? 'Completed' 
-        : ob.completed_quantity > 0 
-          ? 'Partially Fulfilled' 
-          : (new Date(ob.due_date).getTime() < Date.now() ? 'Overdue' : 'Pending');
-      ob.updated_at = new Date().toISOString();
+    if (exp.obligation_id) {
+      const ob = this.localDb.export_obligations.find(o => o.id === exp.obligation_id);
+      if (ob) {
+        ob.completed_quantity = Math.max(0, ob.completed_quantity - exp.quantity);
+        ob.pending_quantity = Math.max(0, ob.required_quantity - ob.completed_quantity);
+        ob.status = ob.completed_quantity >= ob.required_quantity 
+          ? 'Completed' 
+          : ob.completed_quantity > 0 
+            ? 'Partially Fulfilled' 
+            : (new Date(ob.due_date).getTime() < Date.now() ? 'Overdue' : 'Pending');
+        ob.updated_at = new Date().toISOString();
 
-      if (this.firestore) {
-        try {
-          await updateDoc(doc(this.firestore, 'export_obligations', ob.id), {
-            completed_quantity: ob.completed_quantity,
-            pending_quantity: ob.pending_quantity,
-            status: ob.status,
-            updated_at: ob.updated_at
-          });
-        } catch (e: any) {
-          console.warn('Firestore rollback obligation error:', e.message);
+        if (this.firestore) {
+          try {
+            await updateDoc(doc(this.firestore, 'export_obligations', ob.id), {
+              completed_quantity: ob.completed_quantity,
+              pending_quantity: ob.pending_quantity,
+              status: ob.status,
+              updated_at: ob.updated_at
+            });
+          } catch (e: any) {
+            console.warn('Firestore rollback obligation error:', e.message);
+          }
+        }
+      }
+    } else {
+      // Revert from licence obligations in LIFO order (latest completed first)
+      let remainingToRevert = exp.quantity;
+      const licenceObs = this.localDb.export_obligations
+        .filter(o => o.licence_id === exp.licence_id && o.completed_quantity > 0)
+        .sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime());
+
+      for (const ob of licenceObs) {
+        if (remainingToRevert <= 0) break;
+        const revertAmt = Math.min(ob.completed_quantity, remainingToRevert);
+        ob.completed_quantity = Number((ob.completed_quantity - revertAmt).toFixed(2));
+        ob.pending_quantity = Number((ob.required_quantity - ob.completed_quantity).toFixed(2));
+        ob.status = ob.completed_quantity >= ob.required_quantity 
+          ? 'Completed' 
+          : ob.completed_quantity > 0 
+            ? 'Partially Fulfilled' 
+            : (new Date(ob.due_date).getTime() < Date.now() ? 'Overdue' : 'Pending');
+        ob.updated_at = new Date().toISOString();
+        remainingToRevert -= revertAmt;
+
+        if (this.firestore) {
+          try {
+            await updateDoc(doc(this.firestore, 'export_obligations', ob.id), {
+              completed_quantity: ob.completed_quantity,
+              pending_quantity: ob.pending_quantity,
+              status: ob.status,
+              updated_at: ob.updated_at
+            });
+          } catch (e: any) {
+            console.warn('Firestore rollback obligation error:', e.message);
+          }
         }
       }
     }

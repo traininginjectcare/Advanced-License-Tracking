@@ -87,6 +87,7 @@ export const api = {
       approved_quantity: number;
       unit: string;
       wastage_percentage: number;
+      gross_obligation_quantity?: number;
       net_obligation_quantity: number;
       conversion_ratio: number;
       obligation_period_months: number;
@@ -131,15 +132,16 @@ export const api = {
 
   async createImport(data: {
     licence_id: string;
-    licence_product_id: string;
+    licence_product_id?: string;
     import_date: string;
     invoice_number: string;
     supplier: string;
-    quantity: number;
-    unit: string;
-    bill_of_entry_number: string;
+    quantity?: number;
+    unit?: string;
+    bill_of_entry_number?: string;
     remarks?: string;
     allow_overdraw?: boolean;
+    items?: Array<{ licence_product_id: string; product_name: string; quantity: number; unit: string }>;
   }) {
     const res = await fetch('/api/imports', {
       method: 'POST',
@@ -182,17 +184,21 @@ export const api = {
 
   async createExport(data: {
     licence_id: string;
-    obligation_id: string;
+    obligation_id?: string;
     export_date: string;
     invoice_number: string;
     export_type: 'Direct Export' | 'Third-Party Export';
     party_name: string;
     product: string;
-    quantity: number;
-    unit: string;
-    shipping_bill_number: string;
+    quantity?: number;
+    unit?: string;
+    gross_quantity?: number;
+    net_quantity?: number;
+    shipping_bill_number?: string;
     remarks?: string;
     allow_excess?: boolean;
+    items?: Array<{ product: string; quantity: number; unit: string; gross_quantity?: number; net_quantity?: number; batches?: Array<{ batch_number: string; quantity: number }> }>;
+    batches?: Array<{ batch_number: string; quantity: number }>;
   }) {
     const res = await fetch('/api/exports', {
       method: 'POST',
@@ -215,12 +221,26 @@ export const api = {
     return json;
   },
 
-  // Party Follow-up
+  // Party Follow-up & Autocomplete
   async getParties(): Promise<PartyFollowUpSummary[]> {
     const res = await fetch('/api/parties');
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Failed to fetch parties');
     return json.parties;
+  },
+
+  async getPartyNames(): Promise<string[]> {
+    const res = await fetch('/api/party-names');
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Failed to fetch party names');
+    return json.party_names || [];
+  },
+
+  async getManufacturerNames(): Promise<string[]> {
+    const res = await fetch('/api/manufacturer-names');
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Failed to fetch manufacturer names');
+    return json.manufacturer_names || [];
   },
 
   // Documents

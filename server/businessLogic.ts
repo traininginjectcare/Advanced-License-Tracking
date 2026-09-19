@@ -61,16 +61,10 @@ export function calculateLicenceMetrics(
   // Check exports documents
   licenceExports.forEach(exp => {
     const expDocs = licenceDocs.filter(d => d.export_id === exp.id);
-    const hasSb = expDocs.some(d => d.document_type === 'Shipping Bill');
     const hasInv = expDocs.some(d => d.document_type === 'Export Invoice');
     const hasBrc = expDocs.some(d => d.document_type === 'BRC');
-    if (!hasSb) missingDocsCount++;
     if (!hasInv) missingDocsCount++;
     if (!hasBrc) missingDocsCount++;
-    if (exp.export_type === 'Third-Party Export') {
-      const hasNoc = expDocs.some(d => d.document_type === 'NOC');
-      if (!hasNoc) missingDocsCount++;
-    }
   });
 
   return {
@@ -162,10 +156,8 @@ export function getTransactionChecklist(
   if (type === 'import') {
     requiredDocs = ['Bill of Entry'];
   } else {
-    requiredDocs = ['Shipping Bill', 'Export Invoice', 'BRC'];
-    if (exportType === 'Third-Party Export') {
-      requiredDocs.push('NOC');
-    }
+    // Note: NOC and Shipping Bill are not compulsory as per user requirements (come later)
+    requiredDocs = ['Export Invoice', 'BRC'];
   }
 
   const uploadedDocs = documents.filter(d => 
@@ -300,12 +292,8 @@ export function computeDashboardKPIs(
   // Check exports missing docs
   exports.forEach(e => {
     const docs = documents.filter(d => d.export_id === e.id);
-    if (!docs.some(d => d.document_type === 'Shipping Bill')) pendingDocs++;
     if (!docs.some(d => d.document_type === 'Export Invoice')) pendingDocs++;
     if (!docs.some(d => d.document_type === 'BRC')) pendingDocs++;
-    if (e.export_type === 'Third-Party Export' && !docs.some(d => d.document_type === 'NOC')) {
-      pendingDocs++;
-    }
   });
 
   const overallUtilization = totalApproved > 0 ? Number(((totalImported / totalApproved) * 100).toFixed(1)) : 0;

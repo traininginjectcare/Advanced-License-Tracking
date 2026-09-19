@@ -19,7 +19,9 @@ import { NewExportModal } from './components/NewExportModal.tsx';
 import { UploadDocumentModal } from './components/UploadDocumentModal.tsx';
 import { DocumentPreviewModal } from './components/DocumentPreviewModal.tsx';
 import { GlobalSearchModal } from './components/GlobalSearchModal.tsx';
+import { DeecDeclarationModal } from './components/DeecDeclarationModal.tsx';
 import { InjectCareLogo } from './components/InjectCareLogo.tsx';
+import { ExportRecord } from './types/index.ts';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
@@ -46,6 +48,8 @@ export default function App() {
 
   const [previewDocument, setPreviewDocument] = useState<any>(null);
   const [showSearchModal, setShowSearchModal] = useState(false);
+  const [exportPartyFilter, setExportPartyFilter] = useState<string>('');
+  const [deecExportRecord, setDeecExportRecord] = useState<ExportRecord | null>(null);
 
   useEffect(() => {
     loadGlobalData();
@@ -179,10 +183,13 @@ export default function App() {
 
               {currentTab === 'exports' && (
                 <ExportsView
+                  initialSearch={exportPartyFilter}
+                  onClearInitialSearch={() => setExportPartyFilter('')}
                   onOpenNewExport={() => handleOpenNewExport()}
                   onOpenLicence={(id) => setSelectedLicenceId(id)}
                   onOpenUpload={handleOpenUpload}
                   onViewDocument={(doc) => setPreviewDocument(doc)}
+                  onOpenDeecDeclaration={(exp) => setDeecExportRecord(exp)}
                 />
               )}
 
@@ -190,6 +197,10 @@ export default function App() {
                 <PartyFollowUpView
                   onOpenUpload={handleOpenUpload}
                   onOpenLicence={(id) => setSelectedLicenceId(id)}
+                  onViewPartyShipments={(partyName) => {
+                    setExportPartyFilter(partyName);
+                    setCurrentTab('exports');
+                  }}
                 />
               )}
 
@@ -265,11 +276,12 @@ export default function App() {
             setExportInitialLicenceId(undefined);
             setExportInitialObligationId(undefined);
           }}
-          onSuccess={() => {
+          onSuccess={(createdExport) => {
             loadGlobalData();
-            if (currentTab === 'licences' || currentTab === 'obligations') {
-              // keep
-            } else {
+            if (createdExport) {
+              setDeecExportRecord(createdExport);
+            }
+            if (currentTab !== 'licences' && currentTab !== 'obligations') {
               setCurrentTab('exports');
             }
           }}
@@ -309,6 +321,15 @@ export default function App() {
               alert(err.message);
             }
           }}
+        />
+      )}
+
+      {/* DEEC Export Declaration Modal */}
+      {deecExportRecord && (
+        <DeecDeclarationModal
+          exportRecord={deecExportRecord}
+          licence={dashboardData?.licence_summaries?.find(l => l.id === deecExportRecord.licence_id)}
+          onClose={() => setDeecExportRecord(null)}
         />
       )}
 

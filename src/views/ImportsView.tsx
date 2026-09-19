@@ -128,11 +128,24 @@ export const ImportsView: React.FC<ImportsViewProps> = ({
                     <td className="px-4 py-3.5 font-bold text-slate-900 font-mono">
                       {imp.invoice_number}
                     </td>
-                    <td className="px-4 py-3.5 font-mono text-blue-600 font-medium">
-                      {imp.bill_of_entry_number}
+                    <td className="px-4 py-3.5 font-mono font-medium">
+                      {imp.bill_of_entry_number ? (
+                        <span className="text-blue-600">{imp.bill_of_entry_number}</span>
+                      ) : (
+                        <span className="text-slate-400 italic text-[11px]">Pending / Not added</span>
+                      )}
                     </td>
-                    <td className="px-4 py-3.5 max-w-xs truncate font-medium">
-                      {imp.supplier}
+                    <td className="px-4 py-3.5 max-w-xs font-medium">
+                      <div className="text-slate-900 truncate">{imp.supplier}</div>
+                      {imp.items && imp.items.length > 1 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {imp.items.map((it, idx) => (
+                            <span key={idx} className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">
+                              {it.product_name}: {formatNumber(it.quantity)} {it.unit}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3.5 text-right font-mono font-bold text-slate-900">
                       {formatNumber(imp.quantity)} {imp.unit}

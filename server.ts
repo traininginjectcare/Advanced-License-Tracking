@@ -287,14 +287,96 @@ async function startServer() {
         unit, 
         bill_of_entry_number, 
         remarks,
-        allow_overdraw 
+        allow_overdraw,
+        items
       } = req.body;
 
-      if (!licence_id || !licence_product_id || !import_date || !invoice_number || !supplier || !quantity || !bill_of_entry_number) {
-        return res.status(400).json({ success: false, error: 'All mandatory import fields must be provided.' });
+      if (!licence_id || !import_date || !invoice_number || !supplier) {
+        return res.status(400).json({ success: false, error: 'Mandatory fields (Licence, Date, Invoice Number, Supplier) must be provided.' });
+      }
+
+      // Check for duplicate invoice number across all imports
+      const allImports = await dbService.getImports();
+      const duplicateInvoice = allImports.find(
+        i => i.invoice_number.trim().toLowerCase() === invoice_number.trim().toLowerCase()
+      );
+      if (duplicateInvoice) {
+        return res.status(400).json({ 
+          success: false, 
+          error: `Duplicate Entry: An import record with Invoice Number "${invoice_number.trim()}" already exists (Licence: ${duplicateInvoice.licence_number}).` 
+        });
+      }
+
+      // Check for duplicate Bill of Entry number if provided
+      if (bill_of_entry_number && bill_of_entry_number.trim()) {
+        const duplicateBoe = allImports.find(
+          i => i.bill_of_entry_number && i.bill_of_entry_number.trim().toLowerCase() === bill_of_entry_number.trim().toLowerCase()
+        );
+        if (duplicateBoe) {
+          return res.status(400).json({ 
+            success: false, 
+            error: `Duplicate Entry: An import record with Bill of Entry Number "${bill_of_entry_number.trim()}" already exists (Invoice: ${duplicateBoe.invoice_number}).` 
+          });
+        }
       }
 
       const products = await dbService.getLicenceProducts(licence_id);
+
+      // Handle multi-product items or single product line
+      if (items && Array.isArray(items) && items.length > 0) {
+        const validItems = items.filter(it => it.licence_product_id && Number(it.quantity) > 0);
+        if (validItems.length === 0) {
+          return res.status(400).json({ success: false, error: 'Please add at least one valid product line with a positive quantity.' });
+        }
+
+        const obligationSpecs: Array<{ dueDate: string; requiredQuantity: number; productId?: string }> = [];
+        let totalQuantity = 0;
+        const itemNames: string[] = [];
+
+        for (const item of validItems) {
+          const targetProduct = products.find(p => p.id === item.licence_product_id);
+          if (!targetProduct) continue;
+          const itemQty = Number(item.quantity);
+          totalQuantity += itemQty;
+          itemNames.push(`${targetProduct.product_name} (${itemQty} ${item.unit || targetProduct.unit})`);
+
+          const { requiredQuantity, dueDate } = computeObligationForImport(itemQty, targetProduct, import_date);
+          obligationSpecs.push({
+            dueDate,
+            requiredQuantity,
+            productId: targetProduct.id
+          });
+        }
+
+        const result = await dbService.createImport(
+          {
+            licence_id,
+            licence_product_id: validItems[0].licence_product_id,
+            import_date,
+            invoice_number,
+            supplier,
+            quantity: totalQuantity,
+            unit: validItems[0].unit || 'kg',
+            bill_of_entry_number: bill_of_entry_number ? bill_of_entry_number.trim() : '',
+            remarks,
+            items: validItems
+          },
+          obligationSpecs
+        );
+
+        return res.json({
+          success: true,
+          import: result.importRecord,
+          obligation: result.obligation,
+          message: `Import with ${validItems.length} product line(s) recorded successfully. Export obligation generated automatically.`
+        });
+      }
+
+      // Single product line fallback
+      if (!licence_product_id || !quantity) {
+        return res.status(400).json({ success: false, error: 'Product and quantity must be provided.' });
+      }
+
       const targetProduct = products.find(p => p.id === licence_product_id);
       if (!targetProduct) {
         return res.status(400).json({ success: false, error: 'Target licence product line not found.' });
@@ -326,7 +408,7 @@ async function startServer() {
           supplier,
           quantity: requestedQty,
           unit: unit || targetProduct.unit,
-          bill_of_entry_number,
+          bill_of_entry_number: bill_of_entry_number ? bill_of_entry_number.trim() : '',
           remarks
         },
         dueDate,
@@ -394,42 +476,123 @@ async function startServer() {
         product,
         quantity,
         unit,
+        gross_quantity,
+        net_quantity,
         shipping_bill_number,
         remarks,
-        allow_excess
+        allow_excess,
+        items,
+        batches
       } = req.body;
 
-      if (!licence_id || !obligation_id || !export_date || !invoice_number || !party_name || !product || !quantity || !shipping_bill_number) {
-        return res.status(400).json({ success: false, error: 'All mandatory export fields must be provided.' });
+      if (!licence_id || !export_date || !invoice_number || !party_name) {
+        return res.status(400).json({ success: false, error: 'Mandatory fields (Licence, Date, Invoice Number, Party Name) must be provided.' });
       }
 
-      const obligations = await dbService.getObligations(licence_id);
-      const targetObligation = obligations.find(o => o.id === obligation_id);
-      if (!targetObligation) {
-        return res.status(400).json({ success: false, error: 'Selected export obligation record not found.' });
-      }
-
-      const exportQty = Number(quantity);
-      if (exportQty > targetObligation.pending_quantity && !allow_excess) {
-        return res.status(400).json({
-          success: false,
-          warning: true,
-          error: `Export quantity (${exportQty.toLocaleString()} ${unit}) exceeds pending obligation balance (${targetObligation.pending_quantity.toLocaleString()} ${unit}). Please confirm excess allocation.`
+      // Check for duplicate invoice number across all exports
+      const allExports = await dbService.getExports();
+      const duplicateInvoice = allExports.find(
+        e => e.invoice_number.trim().toLowerCase() === invoice_number.trim().toLowerCase()
+      );
+      if (duplicateInvoice) {
+        return res.status(400).json({ 
+          success: false, 
+          error: `Duplicate Entry: An export record with Invoice Number "${invoice_number.trim()}" already exists (Party: ${duplicateInvoice.party_name}).` 
         });
+      }
+
+      // Check for duplicate Shipping Bill number if provided
+      if (shipping_bill_number && shipping_bill_number.trim()) {
+        const duplicateSb = allExports.find(
+          e => e.shipping_bill_number && e.shipping_bill_number.trim().toLowerCase() === shipping_bill_number.trim().toLowerCase()
+        );
+        if (duplicateSb) {
+          return res.status(400).json({ 
+            success: false, 
+            error: `Duplicate Entry: An export record with Shipping Bill Number "${shipping_bill_number.trim()}" already exists (Invoice: ${duplicateSb.invoice_number}).` 
+          });
+        }
+      }
+
+      // Calculate total quantity & format product name
+      let exportQty = Number(quantity) || 0;
+      let finalProduct = (product || '').trim();
+      let finalUnit = unit || 'vials';
+
+      if (items && Array.isArray(items) && items.length > 0) {
+        let totalItemsQty = 0;
+        const productSummaries: string[] = [];
+        for (const item of items) {
+          let itemQty = Number(item.quantity) || 0;
+          if (item.batches && Array.isArray(item.batches) && item.batches.length > 0) {
+            const batchSum = item.batches.reduce((sum: number, b: any) => sum + (Number(b.quantity) || 0), 0);
+            if (batchSum > 0) itemQty = batchSum;
+          }
+          totalItemsQty += itemQty;
+          productSummaries.push(`${item.product} (${itemQty.toLocaleString()} ${item.unit || 'units'})`);
+        }
+        if (totalItemsQty > 0) {
+          exportQty = totalItemsQty;
+        }
+        if (productSummaries.length > 0) {
+          finalProduct = productSummaries.join(', ');
+        }
+        if (items[0]?.unit) {
+          finalUnit = items[0].unit;
+        }
+      } else if (batches && Array.isArray(batches) && batches.length > 0) {
+        const batchSum = batches.reduce((sum: number, b: any) => sum + (Number(b.quantity) || 0), 0);
+        if (batchSum > 0) {
+          exportQty = batchSum;
+        }
+      }
+
+      if (exportQty <= 0) {
+        return res.status(400).json({ success: false, error: 'Export quantity must be greater than 0.' });
+      }
+
+      if (!finalProduct) {
+        return res.status(400).json({ success: false, error: 'Product name must be provided.' });
+      }
+
+      // Check obligation pending balance if linked to a specific obligation or against licence pending balance
+      const obligations = await dbService.getObligations(licence_id);
+      if (obligation_id) {
+        const targetObligation = obligations.find(o => o.id === obligation_id);
+        if (targetObligation && exportQty > targetObligation.pending_quantity && !allow_excess) {
+          return res.status(400).json({
+            success: false,
+            warning: true,
+            error: `Export quantity (${exportQty.toLocaleString()} ${finalUnit}) exceeds pending obligation balance (${targetObligation.pending_quantity.toLocaleString()} ${finalUnit}). Please confirm excess allocation.`
+          });
+        }
+      } else {
+        const totalPending = obligations.reduce((sum, o) => sum + Number(o.pending_quantity || 0), 0);
+        if (totalPending > 0 && exportQty > totalPending && !allow_excess) {
+          return res.status(400).json({
+            success: false,
+            warning: true,
+            error: `Export quantity (${exportQty.toLocaleString()} ${finalUnit}) exceeds total pending obligation balance on this licence (${totalPending.toLocaleString()} ${finalUnit}). Please confirm excess allocation.`
+          });
+        }
       }
 
       const createdExport = await dbService.createExport({
         licence_id,
-        obligation_id,
+        obligation_id: obligation_id || '',
         export_date,
         invoice_number,
         export_type: export_type || 'Direct Export',
         party_name,
-        product,
+        product: finalProduct,
         quantity: exportQty,
-        unit,
-        shipping_bill_number,
-        remarks
+        unit: finalUnit,
+        gross_quantity: gross_quantity ? Number(gross_quantity) : undefined,
+        net_quantity: net_quantity ? Number(net_quantity) : undefined,
+        shipping_bill_number: shipping_bill_number ? shipping_bill_number.trim() : '',
+        remarks,
+        items,
+        batches
       });
 
       res.json({
@@ -451,13 +614,54 @@ async function startServer() {
     }
   });
 
-  // --- 7. PARTY FOLLOW-UP ROUTE ---
+  // --- 7. PARTY & MANUFACTURER AUTOCOMPLETE ROUTES ---
   app.get('/api/parties', async (req, res) => {
     try {
       const exports = await dbService.getExports();
       const docs = await dbService.getDocuments();
       const partySummary = computePartyFollowUp(exports, docs);
       res.json({ success: true, parties: partySummary });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/party-names', async (req, res) => {
+    try {
+      const exports = await dbService.getExports();
+      const nameSet = new Set<string>();
+      exports.forEach(e => { if (e.party_name) nameSet.add(e.party_name.trim()); });
+      const sorted = Array.from(nameSet).sort((a, b) => a.localeCompare(b));
+      res.json({ success: true, party_names: sorted });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/manufacturer-names', async (req, res) => {
+    try {
+      const imports = await dbService.getImports();
+      const nameSet = new Set<string>();
+      const defaultManufacturers = [
+        'Sinochem Pharma Corp (China)',
+        'Hebei Welcome Pharmaceutical Co. Ltd. (China)',
+        'Shandong Lukang Pharmaceutical Group (China)',
+        'DSM Sinochem Pharmaceuticals (Netherlands/India)',
+        'Inject Care Parenterals LLP (Plot 814/B, GIDC Panoli)',
+        'Aurobindo Pharma Ltd. (Hyderabad)',
+        'Dr. Reddy\'s Laboratories Ltd. (Hyderabad)',
+        'Cipla Ltd. (Mumbai/Kurkumbh)',
+        'Sun Pharmaceutical Industries Ltd. (Vadodara)',
+        'Zhejiang Guobang Pharmaceutical Co. (China)',
+        'CSPC Pharmaceutical Group Ltd. (China)',
+        'Nectar Lifesciences Ltd. (Punjab)'
+      ];
+      defaultManufacturers.forEach(m => nameSet.add(m));
+      imports.forEach(i => {
+        if (i.supplier) nameSet.add(i.supplier.trim());
+      });
+      const sorted = Array.from(nameSet).sort((a, b) => a.localeCompare(b));
+      res.json({ success: true, manufacturer_names: sorted });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
