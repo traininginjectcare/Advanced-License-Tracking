@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { LicenceDetailResponse, api } from '../api/client.ts';
 import { StatusBadge } from './StatusBadge.tsx';
 import { DocumentChecklistBadge } from './DocumentChecklistBadge.tsx';
+import { AdminDeleteConfirmModal } from './AdminDeleteConfirmModal.tsx';
 import { formatNumber } from '../utils/format.ts';
 import { 
   X, 
@@ -42,6 +43,7 @@ export const LicenceDetailModal: React.FC<LicenceDetailModalProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'imports' | 'obligations' | 'exports' | 'documents'>('overview');
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'import' | 'export'; id: string; identifier: string } | null>(null);
 
   useEffect(() => {
     loadDetails();
@@ -49,6 +51,7 @@ export const LicenceDetailModal: React.FC<LicenceDetailModalProps> = ({
 
   const loadDetails = async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await api.getLicenceDetail(licenceId);
       setData(res);
@@ -56,28 +59,6 @@ export const LicenceDetailModal: React.FC<LicenceDetailModalProps> = ({
       setError(err.message || 'Failed to load licence details');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleDeleteImport = async (importId: string) => {
-    if (!confirm('Are you sure you want to delete this import?')) return;
-    try {
-      await api.deleteImport(importId);
-      loadDetails();
-      onRefreshParent();
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
-
-  const handleDeleteExport = async (exportId: string) => {
-    if (!confirm('Are you sure you want to delete this export shipment?')) return;
-    try {
-      await api.deleteExport(exportId);
-      loadDetails();
-      onRefreshParent();
-    } catch (err: any) {
-      alert(err.message);
     }
   };
 
@@ -316,7 +297,7 @@ export const LicenceDetailModal: React.FC<LicenceDetailModalProps> = ({
                   <h3 className="font-semibold text-xs text-slate-800 uppercase tracking-wider">
                     Licence Product Lines & Norms ({products.length})
                   </h3>
-                  <span className="text-[11px] text-slate-500 font-mono">SION Norms / Wastage Allowances</span>
+                  <span className="text-[11px] text-slate-500 font-mono">Wastage & Obligation Allowances</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs text-left">
@@ -326,29 +307,34 @@ export const LicenceDetailModal: React.FC<LicenceDetailModalProps> = ({
                         <th className="px-4 py-2.5">Type</th>
                         <th className="px-4 py-2.5 text-right">Approved Qty</th>
                         <th className="px-4 py-2.5">Unit</th>
+                        <th className="px-4 py-2.5 text-right">Wastage</th>
                         <th className="px-4 py-2.5 text-right">Wastage %</th>
-                        <th className="px-4 py-2.5 text-right">Conversion Ratio</th>
                         <th className="px-4 py-2.5 text-right">Net Obligation Qty</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700">
-                      {products.map(p => (
-                        <tr key={p.id} className="hover:bg-slate-50/70">
-                          <td className="px-5 py-3 font-semibold text-slate-900">{p.product_name}</td>
-                          <td className="px-4 py-3">
-                            <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] font-medium">
-                              {p.product_type}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-right font-mono font-medium">{formatNumber(p.approved_quantity)}</td>
-                          <td className="px-4 py-3 font-mono">{p.unit}</td>
-                          <td className="px-4 py-3 text-right font-mono">{p.wastage_percentage}%</td>
-                          <td className="px-4 py-3 text-right font-mono">1 : {p.conversion_ratio}</td>
-                          <td className="px-4 py-3 text-right font-mono font-semibold text-teal-800">
-                            {formatNumber(p.net_obligation_quantity)}
-                          </td>
-                        </tr>
-                      ))}
+                      {products.map(p => {
+                        const wastageQty = Math.max(0, (p.approved_quantity || 0) - (p.net_obligation_quantity || 0));
+                        return (
+                          <tr key={p.id} className="hover:bg-slate-50/70">
+                            <td className="px-5 py-3 font-semibold text-slate-900">{p.product_name}</td>
+                            <td className="px-4 py-3">
+                              <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] font-medium">
+                                {p.product_type}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono font-medium">{formatNumber(p.approved_quantity)}</td>
+                            <td className="px-4 py-3 font-mono">{p.unit}</td>
+                            <td className="px-4 py-3 text-right font-mono text-amber-700">
+                              {formatNumber(wastageQty)} {p.unit}
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono">{p.wastage_percentage}%</td>
+                            <td className="px-4 py-3 text-right font-mono font-semibold text-teal-800">
+                              {formatNumber(p.net_obligation_quantity)} {p.unit}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -448,9 +434,9 @@ export const LicenceDetailModal: React.FC<LicenceDetailModalProps> = ({
                           <td className="px-4 py-3 text-right">
                             <button
                               type="button"
-                              onClick={() => handleDeleteImport(imp.id)}
-                              className="text-rose-600 hover:text-rose-800 p-1 rounded hover:bg-rose-50"
-                              title="Delete Import"
+                              onClick={() => setDeleteTarget({ type: 'import', id: imp.id, identifier: `Import Invoice: ${imp.invoice_number}` })}
+                              className="text-rose-600 hover:text-rose-800 p-1 rounded hover:bg-rose-50 cursor-pointer"
+                              title="Delete Import (Requires Admin Password)"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -595,9 +581,9 @@ export const LicenceDetailModal: React.FC<LicenceDetailModalProps> = ({
                           <td className="px-4 py-3 text-right">
                             <button
                               type="button"
-                              onClick={() => handleDeleteExport(exp.id)}
-                              className="text-rose-600 hover:text-rose-800 p-1 rounded hover:bg-rose-50"
-                              title="Delete Export"
+                              onClick={() => setDeleteTarget({ type: 'export', id: exp.id, identifier: `Export Invoice: ${exp.invoice_number}` })}
+                              className="text-rose-600 hover:text-rose-800 p-1 rounded hover:bg-rose-50 cursor-pointer"
+                              title="Delete Export Shipment (Requires Admin Password)"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -685,12 +671,34 @@ export const LicenceDetailModal: React.FC<LicenceDetailModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium transition-colors"
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium transition-colors cursor-pointer"
           >
             Close Master View
           </button>
         </div>
       </div>
+
+      {/* Admin Protected Deletion Modal */}
+      <AdminDeleteConfirmModal
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title={deleteTarget?.type === 'import' ? 'Delete Import Consignment' : 'Delete Export Shipment'}
+        itemIdentifier={deleteTarget?.identifier || ''}
+        consequenceText={deleteTarget?.type === 'import'
+          ? 'Deleting this import will restore available licence import balance and remove the associated export obligation.'
+          : 'Deleting this export shipment will reverse fulfilled obligations.'}
+        onConfirm={async (password) => {
+          if (deleteTarget) {
+            if (deleteTarget.type === 'import') {
+              await api.deleteImport(deleteTarget.id, password);
+            } else {
+              await api.deleteExport(deleteTarget.id, password);
+            }
+            await loadDetails();
+            onRefreshParent();
+          }
+        }}
+      />
     </div>
   );
 };

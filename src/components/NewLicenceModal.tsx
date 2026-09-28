@@ -12,17 +12,15 @@ interface ProductFormRow {
   product_type: string;
   approved_quantity: string;
   unit: string;
+  wastage_quantity: string;
   wastage_percentage: string;
-  gross_obligation_quantity: string;
   net_obligation_quantity: string;
-  conversion_ratio: string;
   obligation_period_months: string;
 }
 
 export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuccess }) => {
   const [licenceNumber, setLicenceNumber] = useState('');
   const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
-  const [showGrossObligation, setShowGrossObligation] = useState(true);
   
   // Default import validity: 12 months from issue
   const defaultImportVal = new Date();
@@ -38,14 +36,13 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
 
   const [products, setProducts] = useState<ProductFormRow[]>([
     {
-      product_name: 'Amoxicillin Sodium Sterile USP/BP',
+      product_name: '',
       product_type: 'Raw Material / API',
-      approved_quantity: '1000',
+      approved_quantity: '',
       unit: 'kg',
-      wastage_percentage: '2.0',
-      gross_obligation_quantity: '7500000',
-      net_obligation_quantity: '7350000',
-      conversion_ratio: '7500',
+      wastage_quantity: '',
+      wastage_percentage: '',
+      net_obligation_quantity: '',
       obligation_period_months: '18'
     }
   ]);
@@ -61,10 +58,9 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
         product_type: 'Raw Material / API',
         approved_quantity: '',
         unit: 'kg',
-        wastage_percentage: '2.0',
-        gross_obligation_quantity: '',
+        wastage_quantity: '',
+        wastage_percentage: '',
         net_obligation_quantity: '',
-        conversion_ratio: '1.0',
         obligation_period_months: '18'
       }
     ]);
@@ -82,40 +78,66 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
     const updated = [...products];
     updated[index] = { ...updated[index], [field]: value };
 
-    const qty = parseFloat(field === 'approved_quantity' ? value : updated[index].approved_quantity) || 0;
-    const ratio = parseFloat(field === 'conversion_ratio' ? value : updated[index].conversion_ratio) || 1;
-    const wastage = parseFloat(field === 'wastage_percentage' ? value : updated[index].wastage_percentage) || 0;
+    const approved = parseFloat(field === 'approved_quantity' ? value : updated[index].approved_quantity) || 0;
 
-    if (field === 'approved_quantity' || field === 'conversion_ratio') {
-      if (qty > 0 && ratio > 0) {
-        const gross = Math.round(qty * ratio);
-        updated[index].gross_obligation_quantity = gross.toString();
-        const net = Math.round(gross * (1 - wastage / 100));
-        updated[index].net_obligation_quantity = net.toString();
-      }
-    } else if (field === 'gross_obligation_quantity') {
-      const gross = parseFloat(value) || 0;
-      if (gross > 0) {
-        const net = Math.round(gross * (1 - wastage / 100));
-        updated[index].net_obligation_quantity = net.toString();
-        if (qty > 0) {
-          updated[index].conversion_ratio = (gross / qty).toString();
+    if (field === 'approved_quantity') {
+      const appVal = parseFloat(value) || 0;
+      const wastVal = parseFloat(updated[index].wastage_quantity);
+      const netVal = parseFloat(updated[index].net_obligation_quantity);
+      const pctVal = parseFloat(updated[index].wastage_percentage);
+
+      if (appVal > 0) {
+        if (!isNaN(wastVal) && updated[index].wastage_quantity !== '') {
+          // If wastage in kg is present, calculate net and percentage
+          const net = Math.max(0, appVal - wastVal);
+          updated[index].net_obligation_quantity = Number.isInteger(net) ? net.toString() : parseFloat(net.toFixed(4)).toString();
+          const pct = (wastVal / appVal) * 100;
+          updated[index].wastage_percentage = Number.isInteger(pct) ? pct.toString() : parseFloat(pct.toFixed(2)).toString();
+        } else if (!isNaN(netVal) && updated[index].net_obligation_quantity !== '') {
+          // If net is present, calculate wastage in kg and percentage
+          const w = Math.max(0, appVal - netVal);
+          updated[index].wastage_quantity = Number.isInteger(w) ? w.toString() : parseFloat(w.toFixed(4)).toString();
+          const pct = (w / appVal) * 100;
+          updated[index].wastage_percentage = Number.isInteger(pct) ? pct.toString() : parseFloat(pct.toFixed(2)).toString();
+        } else if (!isNaN(pctVal) && updated[index].wastage_percentage !== '') {
+          // If % is present, calculate wastage in kg and net
+          const w = (appVal * pctVal) / 100;
+          updated[index].wastage_quantity = Number.isInteger(w) ? w.toString() : parseFloat(w.toFixed(4)).toString();
+          const net = Math.max(0, appVal - w);
+          updated[index].net_obligation_quantity = Number.isInteger(net) ? net.toString() : parseFloat(net.toFixed(4)).toString();
         }
       }
-    } else if (field === 'wastage_percentage') {
-      const gross = parseFloat(updated[index].gross_obligation_quantity) || (qty * ratio);
-      if (gross > 0) {
-        const net = Math.round(gross * (1 - wastage / 100));
-        updated[index].net_obligation_quantity = net.toString();
+    } else if (field === 'wastage_quantity') {
+      const wastVal = parseFloat(value);
+      if (!isNaN(wastVal) && approved > 0) {
+        // Calculate net: approved - wastage
+        const net = Math.max(0, approved - wastVal);
+        updated[index].net_obligation_quantity = Number.isInteger(net) ? net.toString() : parseFloat(net.toFixed(4)).toString();
+        // Calculate percentage: (wastage / approved) * 100
+        const pct = (wastVal / approved) * 100;
+        updated[index].wastage_percentage = Number.isInteger(pct) ? pct.toString() : parseFloat(pct.toFixed(2)).toString();
+      } else if (value === '' && approved > 0) {
+        updated[index].wastage_percentage = '';
       }
     } else if (field === 'net_obligation_quantity') {
-      const net = parseFloat(value) || 0;
-      if (net > 0 && wastage < 100) {
-        const gross = Math.round(net / (1 - wastage / 100));
-        updated[index].gross_obligation_quantity = gross.toString();
-        if (qty > 0) {
-          updated[index].conversion_ratio = (gross / qty).toString();
-        }
+      const netVal = parseFloat(value);
+      if (!isNaN(netVal) && approved > 0) {
+        // Calculate wastage in kg: approved - net
+        const wastVal = Math.max(0, approved - netVal);
+        updated[index].wastage_quantity = Number.isInteger(wastVal) ? wastVal.toString() : parseFloat(wastVal.toFixed(4)).toString();
+        // Calculate percentage: (wastage / approved) * 100
+        const pct = (wastVal / approved) * 100;
+        updated[index].wastage_percentage = Number.isInteger(pct) ? pct.toString() : parseFloat(pct.toFixed(2)).toString();
+      }
+    } else if (field === 'wastage_percentage') {
+      const pctVal = parseFloat(value);
+      if (!isNaN(pctVal) && approved > 0) {
+        // Calculate wastage in kg: approved * (pct / 100)
+        const wastVal = (approved * pctVal) / 100;
+        updated[index].wastage_quantity = Number.isInteger(wastVal) ? wastVal.toString() : parseFloat(wastVal.toFixed(4)).toString();
+        // Calculate net: approved - wastage
+        const net = Math.max(0, approved - wastVal);
+        updated[index].net_obligation_quantity = Number.isInteger(net) ? net.toString() : parseFloat(net.toFixed(4)).toString();
       }
     }
 
@@ -144,17 +166,27 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
     setError(null);
 
     try {
-      const payloadProducts = products.map(p => ({
-        product_name: p.product_name.trim(),
-        product_type: p.product_type,
-        approved_quantity: parseFloat(p.approved_quantity),
-        unit: p.unit.trim(),
-        wastage_percentage: parseFloat(p.wastage_percentage) || 0,
-        gross_obligation_quantity: parseFloat(p.gross_obligation_quantity) || (parseFloat(p.approved_quantity) * (parseFloat(p.conversion_ratio) || 1)),
-        net_obligation_quantity: parseFloat(p.net_obligation_quantity) || 0,
-        conversion_ratio: parseFloat(p.conversion_ratio) || 1,
-        obligation_period_months: parseInt(p.obligation_period_months) || 18
-      }));
+      const payloadProducts = products.map(p => {
+        const approved = parseFloat(p.approved_quantity) || 0;
+        const wastQty = parseFloat(p.wastage_quantity) || 0;
+        const net = parseFloat(p.net_obligation_quantity) || Math.max(0, approved - wastQty);
+        let wastagePct = parseFloat(p.wastage_percentage);
+        if (isNaN(wastagePct)) {
+          wastagePct = approved > 0 ? (wastQty / approved) * 100 : 0;
+        }
+
+        return {
+          product_name: p.product_name.trim(),
+          product_type: p.product_type as any,
+          approved_quantity: approved,
+          unit: p.unit.trim(),
+          wastage_percentage: parseFloat(wastagePct.toFixed(2)),
+          gross_obligation_quantity: approved,
+          net_obligation_quantity: parseFloat(net.toFixed(2)),
+          conversion_ratio: 1,
+          obligation_period_months: parseInt(p.obligation_period_months) || 18
+        };
+      });
 
       const created = await api.createLicence({
         licence_number: licenceNumber.trim(),
@@ -302,15 +334,6 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
                 <p className="text-[11px] text-slate-400">Configure multiple raw materials, APIs, or packaging products approved under this licence.</p>
               </div>
               <div className="flex items-center gap-2">
-                <label className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 hover:bg-slate-200/70 border border-slate-200 rounded-md text-xs font-medium text-slate-700 cursor-pointer transition-colors select-none">
-                  <input
-                    type="checkbox"
-                    checked={showGrossObligation}
-                    onChange={(e) => setShowGrossObligation(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500"
-                  />
-                  <span>Show Gross Obligation</span>
-                </label>
                 <button
                   type="button"
                   onClick={handleAddProduct}
@@ -331,7 +354,7 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
                       <button
                         type="button"
                         onClick={() => handleRemoveProduct(idx)}
-                        className="text-rose-600 hover:text-rose-800 text-xs flex items-center gap-1 p-1 hover:bg-rose-50 rounded"
+                        className="text-rose-600 hover:text-rose-800 text-xs flex items-center gap-1 p-1 hover:bg-rose-50 rounded cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                         <span>Remove</span>
@@ -389,10 +412,10 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
                     </div>
                   </div>
 
-                  <div className={`grid grid-cols-2 ${showGrossObligation ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-3 pt-1`}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-1">
                     <div>
-                      <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                        Approved Quantity <span className="text-rose-500">*</span>
+                      <label className="block text-[11px] font-medium text-slate-700 mb-1">
+                        Approved Quantity <span className="text-rose-500">*</span> <span className="text-slate-400 font-normal">({p.unit || 'kg'})</span>
                       </label>
                       <input
                         type="number"
@@ -403,77 +426,54 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
                         className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-md bg-white outline-none focus:ring-1 focus:ring-teal-600 font-mono"
                         required
                       />
+                      <span className="text-[10px] text-slate-400">Total approved import</span>
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                        Conversion Ratio
+                      <label className="block text-[11px] font-medium text-slate-700 mb-1">
+                        Wastage in Licence <span className="text-slate-400 font-normal">({p.unit || 'kg'})</span>
                       </label>
                       <input
                         type="number"
                         step="any"
-                        value={p.conversion_ratio}
-                        onChange={(e) => handleProductChange(idx, 'conversion_ratio', e.target.value)}
-                        placeholder="e.g. 7500"
+                        value={p.wastage_quantity}
+                        onChange={(e) => handleProductChange(idx, 'wastage_quantity', e.target.value)}
+                        placeholder="e.g. 20"
                         className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-md bg-white outline-none focus:ring-1 focus:ring-teal-600 font-mono"
                       />
+                      <span className="text-[10px] text-slate-400">Wastage given in licence</span>
                     </div>
 
-                    {showGrossObligation && (
-                      <div className="bg-blue-50/60 p-1.5 rounded-lg border border-blue-200">
-                        <label className="block text-[11px] font-semibold text-blue-800 mb-1">
-                          Gross Obligation
-                        </label>
-                        <input
-                          type="number"
-                          step="any"
-                          value={p.gross_obligation_quantity}
-                          onChange={(e) => handleProductChange(idx, 'gross_obligation_quantity', e.target.value)}
-                          placeholder="Approved × Ratio"
-                          className="w-full text-xs px-2 py-1 border border-blue-300 rounded bg-white outline-none focus:ring-1 focus:ring-blue-600 font-mono font-semibold text-blue-900"
-                        />
-                      </div>
-                    )}
-
-                    <div>
-                      <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                        Wastage %
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={p.wastage_percentage}
-                        onChange={(e) => handleProductChange(idx, 'wastage_percentage', e.target.value)}
-                        placeholder="e.g. 2.0"
-                        className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-md bg-white outline-none focus:ring-1 focus:ring-teal-600 font-mono"
-                      />
-                    </div>
-
-                    <div className="bg-emerald-50/60 p-1.5 rounded-lg border border-emerald-200">
-                      <label className="block text-[11px] font-semibold text-emerald-800 mb-1">
-                        Net Obligation Qty
+                    <div className="bg-emerald-50/60 p-2 rounded-lg border border-emerald-200">
+                      <label className="block text-[11px] font-semibold text-emerald-900 mb-1">
+                        Net Quantity <span className="text-emerald-700 font-normal">({p.unit || 'kg'})</span>
                       </label>
                       <input
                         type="number"
                         step="any"
                         value={p.net_obligation_quantity}
                         onChange={(e) => handleProductChange(idx, 'net_obligation_quantity', e.target.value)}
-                        placeholder="Calculated"
-                        className="w-full text-xs px-2 py-1 border border-emerald-300 rounded bg-white outline-none focus:ring-1 focus:ring-emerald-600 font-mono text-emerald-900 font-bold"
+                        placeholder="e.g. 980"
+                        className="w-full text-xs px-2.5 py-1 border border-emerald-300 rounded bg-white outline-none focus:ring-1 focus:ring-emerald-600 font-mono font-bold text-emerald-900"
                       />
+                      <span className="text-[10px] text-emerald-700">Net obligation quantity</span>
+                    </div>
+
+                    <div className="bg-slate-100/70 p-2 rounded-lg border border-slate-200">
+                      <label className="block text-[11px] font-medium text-slate-700 mb-1">
+                        Wastage % <span className="text-slate-400 text-[10px] font-normal">(Auto)</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={p.wastage_percentage}
+                        onChange={(e) => handleProductChange(idx, 'wastage_percentage', e.target.value)}
+                        placeholder="e.g. 2.00"
+                        className="w-full text-xs px-2.5 py-1 border border-slate-300 rounded bg-white outline-none focus:ring-1 focus:ring-teal-600 font-mono text-slate-800"
+                      />
+                      <span className="text-[10px] text-slate-500">Auto-calculated %</span>
                     </div>
                   </div>
-
-                  {showGrossObligation && p.gross_obligation_quantity && (
-                    <div className="text-[11px] text-slate-600 bg-white px-3 py-1.5 rounded border border-slate-200 flex items-center justify-between">
-                      <span className="font-mono text-slate-500">
-                        Formula: Gross ({Number(p.gross_obligation_quantity).toLocaleString()}) - {p.wastage_percentage || 0}% wastage = Net Obligation: <strong className="text-emerald-700 font-bold">{Number(p.net_obligation_quantity || 0).toLocaleString()}</strong> {p.unit}
-                      </span>
-                      <span className="text-[10px] text-blue-600 font-medium bg-blue-50 px-1.5 py-0.5 rounded">
-                        SION Auto-Calculated
-                      </span>
-                    </div>
-                  )}
                 </div>
               ))}
             </div>

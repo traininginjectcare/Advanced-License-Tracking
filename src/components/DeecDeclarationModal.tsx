@@ -31,6 +31,7 @@ interface DeecDeclarationModalProps {
 interface DeecTableRow {
   id: string;
   invoice_no: string;
+  batch_no: string;
   product: string;
   qty: number;
   qty_imported_item1: number;
@@ -59,48 +60,84 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
   const [phoneDetails] = useState('0260-2430434,98980 36614,63592 99966,85111 49413 fax : 0260-2400564');
   const [contactDetails] = useState('Email-Contact@injectcare.com, website-www.injectcare.com,CIN:U24231GJ2002PTC041048');
 
-  // Editable Column headers for Item 1 and Item 2
-  const [item1Header, setItem1Header] = useState('Item Serial No -1');
-  const [item2Header, setItem2Header] = useState('Item Serial No -2');
+  // Editable Column headers for Item 1 (Medicine Powder in Kg) and Item 2 (Vials in Nos)
+  const [item1Header, setItem1Header] = useState('Item Serial No -1 (Medicine in Kg)');
+  const [item2Header, setItem2Header] = useState('Item Serial No -2 (Vials in Nos)');
 
-  // Build initial rows: if exportRecord has items, map them; otherwise provide initial row based on shipment
+  // Build initial rows: batch-wise combined products (Medicine Powder in Kg + Vials in Nos merged into final export good)
   const initialRows: DeecTableRow[] = useMemo(() => {
-    const mainQty = exportRecord.net_quantity || exportRecord.quantity || 21210;
-    // Calculate approximate net content based on standard pharmaceutical injection dosage (e.g. 1.2g vial)
-    const item1Net = parseFloat(((mainQty * 1.26) / 1000).toFixed(2)) || 26.72;
-    const item1Exp = parseFloat(((mainQty * 1.20) / 1000).toFixed(2)) || 25.45;
+    const totalVials = exportRecord.quantity_vials || exportRecord.net_quantity || exportRecord.quantity || 21210;
+    const totalKg = exportRecord.quantity_kg || parseFloat(((totalVials * 1.20) / 1000).toFixed(2)) || 25.45;
+    const combinedProduct = exportRecord.product || 'Amoxicillin for Injection (Medicine Powder & Vials Merged)';
 
-    if (exportRecord.items && exportRecord.items.length > 0) {
-      return exportRecord.items.map((it, idx) => {
-        const q = it.net_quantity || it.quantity;
+    // 1. If export record has batch breakdown, show batch-wise rows directly
+    if (exportRecord.batches && exportRecord.batches.length > 0) {
+      return exportRecord.batches.map((b, idx) => {
+        const bVials = b.quantity_vials || (b.quantity && b.quantity > 500 ? b.quantity : 0) || Math.round(totalVials / exportRecord.batches!.length);
+        const bKg = b.quantity_kg || (b.quantity && b.quantity <= 500 ? b.quantity : 0) || parseFloat(((bVials * (totalKg / (totalVials || 1)))).toFixed(2));
+        const bKgImported = parseFloat((bKg * 1.05).toFixed(2));
+
         return {
-          id: `row-${idx}`,
+          id: `batch-${idx}`,
           invoice_no: exportRecord.invoice_number || `R26005${idx + 9}`,
-          product: it.product,
-          qty: q,
-          qty_imported_item1: parseFloat(((q * 1.26) / 1000).toFixed(2)),
-          qty_exported_item1: parseFloat(((q * 1.20) / 1000).toFixed(2)),
-          qty_imported_item2: q,
-          qty_exported_item2: q
+          batch_no: b.batch_number || `B-250${idx + 1}`,
+          product: idx === 0 ? combinedProduct : '',
+          qty: bVials,
+          qty_imported_item1: bKgImported,
+          qty_exported_item1: bKg,
+          qty_imported_item2: bVials,
+          qty_exported_item2: bVials
         };
       });
     }
 
+    // 2. If export record has items, extract batches from items if present
+    if (exportRecord.items && exportRecord.items.length > 0) {
+      const allItemBatches = exportRecord.items.flatMap(it => 
+        (it.batches || []).map(b => ({ ...b, itemProduct: it.product }))
+      );
+
+      if (allItemBatches.length > 0) {
+        return allItemBatches.map((b, idx) => {
+          const bVials = b.quantity_vials || (b.quantity && b.quantity > 500 ? b.quantity : 0) || Math.round(totalVials / allItemBatches.length);
+          const bKg = b.quantity_kg || (b.quantity && b.quantity <= 500 ? b.quantity : 0) || parseFloat(((bVials * (totalKg / (totalVials || 1)))).toFixed(2));
+          const bKgImported = parseFloat((bKg * 1.05).toFixed(2));
+
+          return {
+            id: `item-batch-${idx}`,
+            invoice_no: exportRecord.invoice_number || `R26005${idx + 9}`,
+            batch_no: b.batch_number || `B-250${idx + 1}`,
+            product: idx === 0 ? combinedProduct : '',
+            qty: bVials,
+            qty_imported_item1: bKgImported,
+            qty_exported_item1: bKg,
+            qty_imported_item2: bVials,
+            qty_exported_item2: bVials
+          };
+        });
+      }
+    }
+
+    // 3. Fallback: single combined row
+    const item1Net = parseFloat((totalKg * 1.05).toFixed(2));
+    const item1Exp = totalKg;
+
     return [{
       id: 'row-1',
       invoice_no: exportRecord.invoice_number || 'R260059',
-      product: exportRecord.product || 'Amoxicillin & Potassium Clavulanate for Injection 1.2g , Co-Amoxiclav for Injection Bp 1.2G (MAXICLAV 1.2G)',
-      qty: mainQty,
+      batch_no: 'B-2501',
+      product: combinedProduct,
+      qty: totalVials,
       qty_imported_item1: item1Net,
       qty_exported_item1: item1Exp,
-      qty_imported_item2: mainQty,
-      qty_exported_item2: mainQty
+      qty_imported_item2: totalVials,
+      qty_exported_item2: totalVials
     }];
   }, [exportRecord]);
 
   const [tableRows, setTableRows] = useState<DeecTableRow[]>(initialRows);
 
-  // Load the exact sample data provided in the user's template
+  // Load the exact sample data provided in the user's template with batches
   const loadExactSampleData = () => {
     setAdvanceLicenceNo('0311048691');
     setDgftAuthority('DGFT DIRECTOR OF FOREIGN TRADE MUMBAI');
@@ -108,7 +145,8 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
       {
         id: 's-1',
         invoice_no: 'R260059',
-        product: 'Amoxicillin & Potassium Clavulanate for Injection 1.2g , Co-Amoxiclav for Injection Bp 1.2G (MAXICLAV 1.2G)',
+        batch_no: 'B-2501',
+        product: 'Amoxicillin & Potassium Clavulanate for Injection 1.2g (Medicine Powder & Vials Merged)',
         qty: 21210.00,
         qty_imported_item1: 26.72,
         qty_exported_item1: 25.45,
@@ -118,6 +156,7 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
       {
         id: 's-2',
         invoice_no: 'R260060',
+        batch_no: 'B-2502',
         product: '',
         qty: 35910.00,
         qty_imported_item1: 45.25,
@@ -128,6 +167,7 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
       {
         id: 's-3',
         invoice_no: 'R260061',
+        batch_no: 'B-2503',
         product: '',
         qty: 50820.00,
         qty_imported_item1: 64.03,
@@ -138,6 +178,7 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
       {
         id: 's-4',
         invoice_no: 'R260062',
+        batch_no: 'B-2504',
         product: '',
         qty: 50820.00,
         qty_imported_item1: 64.03,
@@ -159,6 +200,7 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
       {
         id: `row-${Date.now()}`,
         invoice_no: `R2600${60 + nextIdx}`,
+        batch_no: `B-250${nextIdx}`,
         product: '',
         qty: 0,
         qty_imported_item1: 0,
@@ -199,13 +241,13 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
     out += `EXPORTED UNDER QUANTITY BASED ADVANCE LICENSE SCHEME AGAINST ADVANCE LICENSE No-${advanceLicenceNo} ISSUED BY ${dgftAuthority}\n`;
     out += `THE FOLLOWING MATERIALS HAVE BEEN USED FOR MANUFACTURING OF GOODS COVERED UNDER THIS SHIPMENTS,\n\n`;
 
-    out += `Invoice no\tProduct\tQty\tQty -Imported Net Content ${item1Header}\tQty Exported  Net Content ${item1Header.replace('-', '')}\tQty -Imported Net Content ${item2Header}\tQty Exported  Net Content ${item2Header.replace('-', '')}\n`;
+    out += `Invoice no\tBatch No\tProduct\tQty (Vials)\tQty -Imported Net Content ${item1Header}\tQty Exported  Net Content ${item1Header.replace('-', '')}\tQty -Imported Net Content ${item2Header}\tQty Exported  Net Content ${item2Header.replace('-', '')}\n`;
 
     tableRows.forEach(r => {
-      out += `${r.invoice_no}\t${r.product}\t${formatQty(r.qty)}\t${formatQty(r.qty_imported_item1)}\t${formatQty(r.qty_exported_item1)}\t${formatQty(r.qty_imported_item2)}\t${formatQty(r.qty_exported_item2)}\n`;
+      out += `${r.invoice_no}\t${r.batch_no || '-'}\t${r.product}\t${formatQty(r.qty)}\t${formatQty(r.qty_imported_item1)}\t${formatQty(r.qty_exported_item1)}\t${formatQty(r.qty_imported_item2)}\t${formatQty(r.qty_exported_item2)}\n`;
     });
 
-    out += `\nTotal\t\t${formatQty(totals.qty)}\t${formatQty(totals.qty_imported_item1)}\t${formatQty(totals.qty_exported_item1)}\t${formatQty(totals.qty_imported_item2)}\t${formatQty(totals.qty_exported_item2)}\n\n`;
+    out += `\nTotal\t\t\t${formatQty(totals.qty)}\t${formatQty(totals.qty_imported_item1)}\t${formatQty(totals.qty_exported_item1)}\t${formatQty(totals.qty_imported_item2)}\t${formatQty(totals.qty_exported_item2)}\n\n`;
 
     out += `This is to certify that the exempt material as listed below have been actually used in the manufacturing of the above products.\n`;
     out += `Certified that the particulars furnished above are correctly based on my verification of material used in resultant products. The process of manufacturer and records being maintained.\n`;
@@ -386,14 +428,25 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
               </p>
             </div>
 
-            {/* Main DEEC Table (Exact 7 Columns specified by user) */}
+            {/* Combined Product Formulation & Batch-wise Notice */}
+            <div className="mb-3 px-3 py-2 bg-blue-50/70 border border-blue-200 rounded-lg text-[11px] text-blue-900 flex items-center justify-between print:hidden">
+              <div>
+                <span className="font-bold">Combined Product Formulation:</span> Medicine Powder (Item Serial No -1 in Kg) and Glass Vials (Item Serial No -2 in Vials) are merged into the finished injectable product, presented batch-wise below.
+              </div>
+              <span className="text-[10px] font-mono font-semibold bg-blue-100 text-blue-800 px-2 py-0.5 rounded border border-blue-300">
+                {tableRows.length} Batch{tableRows.length !== 1 ? 'es' : ''} Tracked
+              </span>
+            </div>
+
+            {/* Main DEEC Table (Batch-wise Combined Products) */}
             <div className="overflow-x-auto my-4 border border-slate-900">
               <table className="w-full border-collapse text-[11px] font-sans">
                 <thead>
                   <tr className="bg-slate-100 text-slate-950 font-bold border-b border-slate-900">
-                    <th className="border-r border-slate-900 p-2 text-left w-24">Invoice no</th>
-                    <th className="border-r border-slate-900 p-2 text-left min-w-[200px]">Product</th>
-                    <th className="border-r border-slate-900 p-2 text-right w-24">Qty</th>
+                    <th className="border-r border-slate-900 p-2 text-left w-20">Invoice no</th>
+                    <th className="border-r border-slate-900 p-2 text-left w-24">Batch No.</th>
+                    <th className="border-r border-slate-900 p-2 text-left min-w-[180px]">Finished Product</th>
+                    <th className="border-r border-slate-900 p-2 text-right w-24">Qty (Vials)</th>
                     <th className="border-r border-slate-900 p-2 text-right w-28">
                       Qty -Imported Net Content {item1Header}
                     </th>
@@ -425,6 +478,21 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
                           />
                         ) : (
                           row.invoice_no
+                        )}
+                      </td>
+
+                      {/* Batch No */}
+                      <td className="border-r border-slate-900 p-2 font-mono font-semibold text-slate-800 align-top">
+                        {isEditMode ? (
+                          <input
+                            type="text"
+                            value={row.batch_no}
+                            onChange={(e) => handleRowChange(row.id, 'batch_no', e.target.value)}
+                            className="w-full border border-slate-300 px-1 py-0.5 rounded font-mono text-xs"
+                            placeholder="Batch No"
+                          />
+                        ) : (
+                          row.batch_no || '-'
                         )}
                       </td>
 
@@ -537,7 +605,7 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
                 {/* Total Row */}
                 <tfoot>
                   <tr className="bg-slate-50 font-bold border-t-2 border-slate-900 text-slate-950">
-                    <td colSpan={2} className="border-r border-slate-900 p-2 font-bold uppercase text-left">
+                    <td colSpan={3} className="border-r border-slate-900 p-2 font-bold uppercase text-left">
                       Total
                     </td>
                     <td className="border-r border-slate-900 p-2 text-right font-mono font-bold">

@@ -24,6 +24,7 @@ export interface LicenceProduct {
   approved_quantity: number;
   unit: string;
   wastage_percentage: number;
+  wastage_quantity?: number;
   gross_obligation_quantity?: number;
   net_obligation_quantity: number;
   conversion_ratio: number;
@@ -49,6 +50,8 @@ export interface ImportProductItem {
   product_name: string;
   quantity: number;
   unit: string;
+  value_usd?: number;
+  value_inr?: number;
 }
 
 export interface ImportRecord {
@@ -60,6 +63,8 @@ export interface ImportRecord {
   supplier: string;
   quantity: number;
   unit: string;
+  value_usd?: number;
+  value_inr?: number;
   bill_of_entry_number?: string;
   remarks?: string;
   items?: ImportProductItem[];
@@ -93,14 +98,23 @@ export interface ExportObligation {
 }
 
 export interface ExportBatchItem {
+  id?: string;
   batch_number: string;
   quantity: number;
+  quantity_vials?: number;
+  quantity_kg?: number;
+  value_inr?: number;
+  value_usd?: number;
 }
 
 export interface ExportProductItem {
   product: string;
   quantity: number;
   unit: string;
+  quantity_vials?: number;
+  quantity_kg?: number;
+  value_inr?: number;
+  value_usd?: number;
   gross_quantity?: number;
   net_quantity?: number;
   batches?: ExportBatchItem[];
@@ -117,6 +131,12 @@ export interface ExportRecord {
   product: string;
   quantity: number;
   unit: string;
+  quantity_vials?: number;
+  quantity_kg?: number;
+  value_inr?: number;
+  value_usd?: number;
+  total_value_inr?: number;
+  total_value_usd?: number;
   gross_quantity?: number;
   net_quantity?: number;
   shipping_bill_number?: string;

@@ -336,9 +336,46 @@ export const SettingsView: React.FC = () => {
         </div>
 
         {authError && (
-          <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{authError}</span>
+          <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-rose-950">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>
+                {authError.includes('unauthorized-domain')
+                  ? 'Domain Not Authorized in Firebase'
+                  : 'Authentication Error'}
+              </span>
+            </div>
+            
+            {authError.includes('unauthorized-domain') ? (
+              <div className="text-xs text-rose-800 space-y-2 leading-relaxed">
+                <p>
+                  Firebase blocked the sign-in because your hosting domain (<strong className="font-mono bg-rose-100 px-1 py-0.5 rounded text-rose-950">{typeof window !== 'undefined' ? window.location.hostname : 'your-domain.onrender.com'}</strong>) is not yet listed under <strong>Authorized Domains</strong> in your Firebase project.
+                </p>
+                <div className="p-3 bg-white/80 border border-rose-200 rounded-lg space-y-1.5 text-[11px] text-slate-800">
+                  <div className="font-bold text-slate-900">How to fix this in 30 seconds:</div>
+                  <ol className="list-decimal list-inside space-y-1 text-slate-700">
+                    <li>
+                      Go to the Firebase Console:
+                      <a 
+                        href="https://console.firebase.google.com/project/gen-lang-client-0809712068/authentication/settings" 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 ml-1 text-blue-600 underline font-semibold hover:text-blue-800"
+                      >
+                        Firebase Auth Settings <ExternalLink className="w-3 h-3 inline" />
+                      </a>
+                    </li>
+                    <li>Click on the <strong>Settings</strong> tab, then select <strong>Authorized domains</strong>.</li>
+                    <li>
+                      Click <strong>Add domain</strong> and paste: <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-bold text-slate-900">{typeof window !== 'undefined' ? window.location.hostname : 'your-app.onrender.com'}</code>
+                    </li>
+                    <li>Click <strong>Save</strong> and refresh this page.</li>
+                  </ol>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-rose-800">{authError}</p>
+            )}
           </div>
         )}
 

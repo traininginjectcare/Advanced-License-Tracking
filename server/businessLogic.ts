@@ -100,16 +100,15 @@ export function computeObligationForImport(
   product: LicenceProduct,
   importDate: string
 ): { requiredQuantity: number; dueDate: string } {
-  // Formula: obligation = importQty * conversion_ratio / (1 - wastage/100) or configured net obligation ratio
-  const wastage = product.wastage_percentage || 0;
   const conversionRatio = product.conversion_ratio || 1;
   
-  // In pharma advance authorisation, if 1 kg API makes 7,500 vials with 2% allowed wastage:
-  // Required finished product export = importQty * conversionRatio (net of wastage)
-  // If product specifies net_obligation_quantity per approved unit:
   let requiredQuantity = 0;
   if (product.approved_quantity > 0 && product.net_obligation_quantity > 0) {
     const ratio = product.net_obligation_quantity / product.approved_quantity;
+    requiredQuantity = importQty * ratio;
+  } else if (product.approved_quantity > 0 && product.wastage_quantity !== undefined && product.wastage_quantity > 0) {
+    const netQty = Math.max(0, product.approved_quantity - product.wastage_quantity);
+    const ratio = netQty / product.approved_quantity;
     requiredQuantity = importQty * ratio;
   } else {
     requiredQuantity = importQty * conversionRatio;
@@ -121,7 +120,7 @@ export function computeObligationForImport(
   date.setMonth(date.getMonth() + monthsToAdd);
 
   return {
-    requiredQuantity: Number(requiredQuantity.toFixed(2)),
+    requiredQuantity: Number(requiredQuantity.toFixed(3)),
     dueDate: date.toISOString().split('T')[0]
   };
 }

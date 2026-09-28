@@ -1,69 +1,174 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 120" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 150" width="100%" height="100%">
   <defs>
-    <!-- Metallic gradient for ICP letters -->
-    <linearGradient id="icpGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+    <!-- Background Plaque Gradient: Deep Royal Navy Blue -->
+    <linearGradient id="plaqueGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#144388" />
+      <stop offset="50%" stop-color="#0f3775" />
+      <stop offset="100%" stop-color="#0b295c" />
+    </linearGradient>
+
+    <!-- ICP Letter Metallic Cyan-to-Purple Gradient -->
+    <linearGradient id="icpMetallic" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#ffffff" />
-      <stop offset="40%" stop-color="#d4f3ed" />
-      <stop offset="70%" stop-color="#64c9bb" />
-      <stop offset="100%" stop-color="#1b5a9a" />
+      <stop offset="15%" stop-color="#72e4f8" />
+      <stop offset="45%" stop-color="#00a0dc" />
+      <stop offset="80%" stop-color="#213a8b" />
+      <stop offset="100%" stop-color="#3d1d6d" />
     </linearGradient>
 
-    <!-- Rich Navy Blue Badge -->
-    <linearGradient id="badgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#143c72" />
-      <stop offset="100%" stop-color="#0b2447" />
-    </linearGradient>
-
-    <!-- Subtle drop shadow -->
-    <filter id="badgeShadow" x="-5%" y="-5%" width="110%" height="115%">
-      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.25" />
+    <!-- Plaque Outer Drop Shadow -->
+    <filter id="cardShadow" x="-10%" y="-10%" width="125%" height="125%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000000" flood-opacity="0.45" />
     </filter>
+
+    <!-- 3D Bevel Highlight for Letters -->
+    <filter id="letterBevel" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="-0.8" dy="-0.8" stdDeviation="0.4" flood-color="#ffffff" flood-opacity="0.9" />
+      <feDropShadow dx="1" dy="1.5" stdDeviation="0.8" flood-color="#05122e" flood-opacity="0.8" />
+    </filter>
+
+    <!-- Syringe Glass Shading -->
+    <linearGradient id="glassGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.8" />
+      <stop offset="30%" stop-color="#aee6f9" stop-opacity="0.3" />
+      <stop offset="70%" stop-color="#ffffff" stop-opacity="0.5" />
+      <stop offset="100%" stop-color="#082b5e" stop-opacity="0.4" />
+    </linearGradient>
+
+    <!-- Hand Glove Shading -->
+    <linearGradient id="handTopGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#cbe3f7" />
+      <stop offset="50%" stop-color="#9fc4eb" />
+      <stop offset="100%" stop-color="#608ab8" />
+    </linearGradient>
+
+    <linearGradient id="handBottomGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#7097c2" />
+      <stop offset="50%" stop-color="#a5c9ee" />
+      <stop offset="100%" stop-color="#d6e8fa" />
+    </linearGradient>
   </defs>
 
-  <!-- Clean Royal Blue Emblem Box -->
-  <rect x="8" y="6" width="344" height="78" rx="10" ry="10" fill="url(#badgeGrad)" stroke="#2b5f9e" stroke-width="1" filter="url(#badgeShadow)" />
+  <!-- Main Rounded Emblem Plaque (Exact 4:3 Ratio of User's Logo) -->
+  <rect 
+    x="12" 
+    y="10" 
+    width="176" 
+    height="130" 
+    rx="14" 
+    ry="14" 
+    fill="url(#plaqueGrad)" 
+    stroke="#3b72b8" 
+    stroke-width="1.8" 
+    filter="url(#cardShadow)" 
+  />
 
-  <!-- Logo Graphics Group -->
-  <g transform="translate(18, 12)">
-    <!-- Syringe Graphic aligned above/into letter C -->
-    <g transform="translate(96, 2)">
-      <!-- Plunger & Top Thumb Ring -->
-      <rect x="18" y="1" width="8" height="2" rx="0.5" fill="#ffffff" />
-      <rect x="21" y="3" width="2" height="6" fill="#ffffff" />
-      <rect x="16" y="9" width="12" height="2" rx="0.5" fill="#ffffff" />
-      <!-- Syringe Glass Barrel with liquid level -->
-      <rect x="18" y="11" width="8" height="18" rx="0.5" fill="#ffffff" fill-opacity="0.2" stroke="#ffffff" stroke-width="1" />
-      <rect x="19" y="16" width="6" height="5" fill="#ffffff" />
-      <!-- Graduation ticks -->
-      <line x1="19" y1="14" x2="22" y2="14" stroke="#ffffff" stroke-width="0.8" />
-      <line x1="19" y1="18" x2="22" y2="18" stroke="#ffffff" stroke-width="0.8" />
-      <line x1="19" y1="22" x2="22" y2="22" stroke="#ffffff" stroke-width="0.8" />
-      <line x1="19" y1="26" x2="22" y2="26" stroke="#ffffff" stroke-width="0.8" />
-      <!-- Needle & Nozzle -->
-      <polygon points="20,29 24,29 23,33 21,33" fill="#ffffff" />
-      <line x1="22" y1="33" x2="22" y2="44" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round" />
-      <!-- Drop / Vial tip -->
-      <circle cx="22" cy="46" r="2" fill="#ffffff" />
-    </g>
+  <!-- Subtle Inner Bevel Highlight Line -->
+  <rect 
+    x="13.5" 
+    y="11.5" 
+    width="173" 
+    height="127" 
+    rx="13" 
+    ry="13" 
+    fill="none" 
+    stroke="#5f9de0" 
+    stroke-width="0.8" 
+    stroke-opacity="0.6" 
+  />
 
-    <!-- ICP Letters -->
-    <!-- I -->
-    <text x="50" y="46" font-family="'Times New Roman', Times, 'Liberation Serif', serif" font-weight="bold" font-size="44" fill="url(#icpGrad)" text-anchor="middle">I</text>
+  <!-- Central Graphic: Upper Hand Holding Syringe -->
+  <g transform="translate(0, -2)">
+    <!-- Top Hand holding plunger -->
+    <path 
+      d="M 103,17 C 98,16 93,21 86,28 C 76,37 62,50 60,54 C 58,58 64,57 70,49 C 76,41 87,30 92,26 C 94,24 97,25 97,27 C 97,30 92,34 89,39 C 94,36 99,31 100,27 C 101,23 105,22 107,26 C 107,29 104,33 101,37 C 104,33 108,28 109,26 C 111,21 106,17 103,17 Z" 
+      fill="url(#handTopGrad)" 
+      stroke="#204374" 
+      stroke-width="0.6" 
+    />
+    <!-- Syringe Plunger Top Ring & Shaft -->
+    <ellipse cx="102" cy="18" rx="6" ry="2.2" fill="#ffffff" stroke="#254e85" stroke-width="0.8" />
+    <rect x="100.5" y="19" width="3" height="12" fill="#e2edf8" stroke="#1d4377" stroke-width="0.7" />
+    <rect x="96" y="30" width="12" height="2.5" rx="1" fill="#ffffff" stroke="#1d4377" stroke-width="0.7" />
+
+    <!-- Syringe Barrel -->
+    <rect x="98" y="32.5" width="8" height="26" rx="1" fill="url(#glassGrad)" stroke="#1a3d6e" stroke-width="0.8" />
+    <!-- Liquid Level in Syringe -->
+    <rect x="98.5" y="38" width="7" height="18" fill="#132c58" opacity="0.85" />
+    <!-- Ticks on barrel -->
+    <line x1="99" y1="36" x2="101.5" y2="36" stroke="#ffffff" stroke-width="0.6" />
+    <line x1="99" y1="41" x2="102.5" y2="41" stroke="#ffffff" stroke-width="0.6" />
+    <line x1="99" y1="46" x2="102.5" y2="46" stroke="#ffffff" stroke-width="0.6" />
+    <line x1="99" y1="51" x2="101.5" y2="51" stroke="#ffffff" stroke-width="0.6" />
     
-    <!-- C -->
-    <text x="118" y="46" font-family="'Times New Roman', Times, 'Liberation Serif', serif" font-weight="bold" font-size="44" fill="url(#icpGrad)" text-anchor="middle">C</text>
-    
-    <!-- P -->
-    <text x="184" y="46" font-family="'Times New Roman', Times, 'Liberation Serif', serif" font-weight="bold" font-size="44" fill="url(#icpGrad)" text-anchor="middle">P</text>
+    <!-- Syringe Nozzle & Metal Needle -->
+    <polygon points="100,58.5 104,58.5 103,62 101,62" fill="#ffffff" stroke="#1a3d6e" stroke-width="0.5" />
+    <line x1="102" y1="62" x2="102" y2="76" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round" />
 
-    <!-- Company Name under ICP -->
-    <text x="160" y="64" font-family="'Arial', 'Liberation Sans', sans-serif" font-weight="bold" font-size="10.5" fill="#ffffff" text-anchor="middle" letter-spacing="0.6">
-      INJECT CARE PARENTERALS PVT. LTD.
-    </text>
+    <!-- Lower Hand Supporting Vial -->
+    <path 
+      d="M 94,124 L 97,94 C 95,92 92,86 96,80 C 99,75 105,75 108,80 C 111,85 109,92 107,94 L 110,124 Z" 
+      fill="url(#handBottomGrad)" 
+      stroke="#193963" 
+      stroke-width="0.6" 
+    />
+    <!-- Glass Vial / Stopper where needle inserts -->
+    <rect x="98" y="74" width="8" height="3" rx="0.8" fill="#c3d9ef" stroke="#163865" stroke-width="0.6" />
+    <rect x="99.5" y="77" width="5" height="3" fill="#ffffff" stroke="#163865" stroke-width="0.6" />
+    <rect x="97" y="80" width="10" height="14" rx="2" fill="url(#glassGrad)" stroke="#163865" stroke-width="0.7" />
+    <!-- Powder / Liquid Level in Vial -->
+    <rect x="97.5" y="85" width="9" height="8" rx="1" fill="#1b4177" opacity="0.6" />
   </g>
 
-  <!-- Tagline underneath the blue badge -->
-  <text x="180" y="102" font-family="'Times New Roman', Times, 'Liberation Serif', serif" font-style="italic" font-weight="bold" font-size="12.5" fill="#143c72" text-anchor="middle" letter-spacing="0.3">
-    A Partner for the Quality Conscious
-  </text>
+  <!-- Big Serif ICP Letterforms with Metallic Blue/Cyan Gradient and 3D Bevel -->
+  <!-- 'I' Letter on the Left -->
+  <text 
+    x="34" 
+    y="86" 
+    font-family="'Times New Roman', Georgia, serif" 
+    font-weight="bold" 
+    font-size="47" 
+    fill="url(#icpMetallic)" 
+    stroke="#ffffff" 
+    stroke-width="0.9" 
+    filter="url(#letterBevel)"
+  >I</text>
+
+  <!-- 'C' Letter in the Center (Curving around the syringe/vial apparatus) -->
+  <text 
+    x="74" 
+    y="86" 
+    font-family="'Times New Roman', Georgia, serif" 
+    font-weight="bold" 
+    font-size="47" 
+    fill="url(#icpMetallic)" 
+    stroke="#ffffff" 
+    stroke-width="0.9" 
+    filter="url(#letterBevel)"
+  >C</text>
+
+  <!-- 'P' Letter on the Right -->
+  <text 
+    x="126" 
+    y="86" 
+    font-family="'Times New Roman', Georgia, serif" 
+    font-weight="bold" 
+    font-size="47" 
+    fill="url(#icpMetallic)" 
+    stroke="#ffffff" 
+    stroke-width="0.9" 
+    filter="url(#letterBevel)"
+  >P</text>
+
+  <!-- Bottom Company Title: Inject Care Parenterals Pvt. Ltd. -->
+  <text 
+    x="100" 
+    y="126" 
+    font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" 
+    font-weight="bold" 
+    font-size="8.8" 
+    fill="#ffffff" 
+    text-anchor="middle" 
+    letter-spacing="0.2"
+  >Inject Care Parenterals Pvt. Ltd.</text>
 </svg>

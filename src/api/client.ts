@@ -114,8 +114,14 @@ export const api = {
     return json.licence;
   },
 
-  async deleteLicence(id: string) {
-    const res = await fetch(`/api/licences/${id}`, { method: 'DELETE' });
+  async deleteLicence(id: string, password?: string) {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (password) headers['x-admin-password'] = password;
+    const res = await fetch(`/api/licences/${id}`, { 
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({ password })
+    });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Failed to delete licence');
     return json;
@@ -138,10 +144,12 @@ export const api = {
     supplier: string;
     quantity?: number;
     unit?: string;
+    value_usd?: number;
+    value_inr?: number;
     bill_of_entry_number?: string;
     remarks?: string;
     allow_overdraw?: boolean;
-    items?: Array<{ licence_product_id: string; product_name: string; quantity: number; unit: string }>;
+    items?: Array<{ licence_product_id: string; product_name: string; quantity: number; unit: string; value_usd?: number; value_inr?: number }>;
   }) {
     const res = await fetch('/api/imports', {
       method: 'POST',
@@ -157,8 +165,14 @@ export const api = {
     return json;
   },
 
-  async deleteImport(id: string) {
-    const res = await fetch(`/api/imports/${id}`, { method: 'DELETE' });
+  async deleteImport(id: string, password?: string) {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (password) headers['x-admin-password'] = password;
+    const res = await fetch(`/api/imports/${id}`, { 
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({ password })
+    });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Failed to delete import');
     return json;
@@ -192,13 +206,19 @@ export const api = {
     product: string;
     quantity?: number;
     unit?: string;
+    quantity_vials?: number;
+    quantity_kg?: number;
+    value_usd?: number;
+    value_inr?: number;
+    total_value_inr?: number;
+    total_value_usd?: number;
     gross_quantity?: number;
     net_quantity?: number;
     shipping_bill_number?: string;
     remarks?: string;
     allow_excess?: boolean;
-    items?: Array<{ product: string; quantity: number; unit: string; gross_quantity?: number; net_quantity?: number; batches?: Array<{ batch_number: string; quantity: number }> }>;
-    batches?: Array<{ batch_number: string; quantity: number }>;
+    items?: Array<{ product: string; quantity: number; unit: string; quantity_vials?: number; quantity_kg?: number; value_inr?: number; value_usd?: number; gross_quantity?: number; net_quantity?: number; batches?: Array<{ id?: string; batch_number: string; quantity?: number; quantity_vials?: number; quantity_kg?: number; value_inr?: number; value_usd?: number }> }>;
+    batches?: Array<{ id?: string; batch_number: string; quantity?: number; quantity_vials?: number; quantity_kg?: number; value_inr?: number; value_usd?: number }>;
   }) {
     const res = await fetch('/api/exports', {
       method: 'POST',
@@ -214,8 +234,14 @@ export const api = {
     return json;
   },
 
-  async deleteExport(id: string) {
-    const res = await fetch(`/api/exports/${id}`, { method: 'DELETE' });
+  async deleteExport(id: string, password?: string) {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (password) headers['x-admin-password'] = password;
+    const res = await fetch(`/api/exports/${id}`, { 
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({ password })
+    });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Failed to delete export');
     return json;
@@ -266,10 +292,17 @@ export const api = {
     return json;
   },
 
-  async deleteDocument(id: string) {
+  async deleteDocument(id: string, password?: string) {
+    const authHeaders = getAuthHeaders();
+    const headers: Record<string, string> = {
+      ...authHeaders,
+      'Content-Type': 'application/json'
+    };
+    if (password) headers['x-admin-password'] = password;
     const res = await fetch(`/api/documents/${id}`, { 
       method: 'DELETE',
-      headers: getAuthHeaders()
+      headers,
+      body: JSON.stringify({ password })
     });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Failed to delete document');

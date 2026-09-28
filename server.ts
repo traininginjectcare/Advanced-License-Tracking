@@ -39,6 +39,30 @@ async function startServer() {
     next();
   });
 
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Injectcare@123';
+
+  function checkAdminPassword(req: express.Request): boolean {
+    const header = req.headers['x-admin-password'];
+    const bodyPass = (req.body && typeof req.body === 'object') ? (req.body as any).password : undefined;
+    const queryPass = req.query?.password;
+    const authHeader = req.headers['authorization'];
+    let bearerPass: string | undefined;
+    if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Admin ')) {
+      bearerPass = authHeader.substring(6);
+    }
+    const candidate = (header || bodyPass || queryPass || bearerPass || '').toString().trim();
+    return candidate === ADMIN_PASSWORD;
+  }
+
+  // Admin password verification endpoint
+  app.post('/api/auth/verify-admin-password', (req, res) => {
+    const { password } = req.body || {};
+    if ((password || '').trim() === ADMIN_PASSWORD) {
+      return res.json({ success: true, verified: true });
+    }
+    return res.status(401).json({ success: false, error: 'Incorrect Admin Secret Password' });
+  });
+
   // --- 1. SYSTEM & STATUS ROUTES ---
   app.get('/api/status', async (req, res) => {
     try {
@@ -225,6 +249,9 @@ async function startServer() {
 
   app.delete('/api/licences/:id', async (req, res) => {
     try {
+      if (!checkAdminPassword(req)) {
+        return res.status(403).json({ success: false, error: 'Admin Authorization Required: Invalid secret password. Licence deletion blocked.' });
+      }
       await dbService.deleteLicence(req.params.id);
       res.json({ success: true, message: 'Licence deleted successfully' });
     } catch (err: any) {
@@ -285,6 +312,8 @@ async function startServer() {
         supplier, 
         quantity, 
         unit, 
+        value_usd,
+        value_inr,
         bill_of_entry_number, 
         remarks,
         allow_overdraw,
@@ -357,6 +386,8 @@ async function startServer() {
             supplier,
             quantity: totalQuantity,
             unit: validItems[0].unit || 'kg',
+            value_usd: value_usd !== undefined && value_usd !== '' ? Number(value_usd) : undefined,
+            value_inr: value_inr !== undefined && value_inr !== '' ? Number(value_inr) : undefined,
             bill_of_entry_number: bill_of_entry_number ? bill_of_entry_number.trim() : '',
             remarks,
             items: validItems
@@ -408,6 +439,8 @@ async function startServer() {
           supplier,
           quantity: requestedQty,
           unit: unit || targetProduct.unit,
+          value_usd: value_usd !== undefined && value_usd !== '' ? Number(value_usd) : undefined,
+          value_inr: value_inr !== undefined && value_inr !== '' ? Number(value_inr) : undefined,
           bill_of_entry_number: bill_of_entry_number ? bill_of_entry_number.trim() : '',
           remarks
         },
@@ -428,6 +461,9 @@ async function startServer() {
 
   app.delete('/api/imports/:id', async (req, res) => {
     try {
+      if (!checkAdminPassword(req)) {
+        return res.status(403).json({ success: false, error: 'Admin Authorization Required: Invalid secret password. Import deletion blocked.' });
+      }
       await dbService.deleteImport(req.params.id);
       res.json({ success: true, message: 'Import and linked obligation removed.' });
     } catch (err: any) {
@@ -476,6 +512,12 @@ async function startServer() {
         product,
         quantity,
         unit,
+        quantity_vials,
+        quantity_kg,
+        value_usd,
+        value_inr,
+        total_value_inr,
+        total_value_usd,
         gross_quantity,
         net_quantity,
         shipping_bill_number,
@@ -519,13 +561,39 @@ async function startServer() {
       let finalProduct = (product || '').trim();
       let finalUnit = unit || 'vials';
 
+      let sumBatchVials = 0;
+      let sumBatchKg = 0;
+      let sumBatchValInr = 0;
+      let sumBatchValUsd = 0;
+
+      if (batches && Array.isArray(batches) && batches.length > 0) {
+        batches.forEach(b => {
+          const v = Number(b.quantity_vials !== undefined ? b.quantity_vials : b.quantity) || 0;
+          const k = Number(b.quantity_kg) || 0;
+          const valInr = Number(b.value_inr) || 0;
+          const valUsd = Number(b.value_usd) || 0;
+          sumBatchVials += v;
+          sumBatchKg += k;
+          sumBatchValInr += valInr;
+          sumBatchValUsd += valUsd;
+        });
+        if (sumBatchVials > 0) {
+          exportQty = sumBatchVials;
+        }
+      }
+
+      const finalQuantityVials = quantity_vials !== undefined && quantity_vials !== '' ? Number(quantity_vials) : (sumBatchVials > 0 ? sumBatchVials : undefined);
+      const finalQuantityKg = quantity_kg !== undefined && quantity_kg !== '' ? Number(quantity_kg) : (sumBatchKg > 0 ? sumBatchKg : undefined);
+      const finalTotalValInr = (total_value_inr !== undefined && total_value_inr !== '') ? Number(total_value_inr) : ((value_inr !== undefined && value_inr !== '') ? Number(value_inr) : (sumBatchValInr > 0 ? sumBatchValInr : undefined));
+      const finalTotalValUsd = (total_value_usd !== undefined && total_value_usd !== '') ? Number(total_value_usd) : ((value_usd !== undefined && value_usd !== '') ? Number(value_usd) : (sumBatchValUsd > 0 ? sumBatchValUsd : undefined));
+
       if (items && Array.isArray(items) && items.length > 0) {
         let totalItemsQty = 0;
         const productSummaries: string[] = [];
         for (const item of items) {
           let itemQty = Number(item.quantity) || 0;
           if (item.batches && Array.isArray(item.batches) && item.batches.length > 0) {
-            const batchSum = item.batches.reduce((sum: number, b: any) => sum + (Number(b.quantity) || 0), 0);
+            const batchSum = item.batches.reduce((sum: number, b: any) => sum + (Number(b.quantity_vials || b.quantity) || 0), 0);
             if (batchSum > 0) itemQty = batchSum;
           }
           totalItemsQty += itemQty;
@@ -540,15 +608,15 @@ async function startServer() {
         if (items[0]?.unit) {
           finalUnit = items[0].unit;
         }
-      } else if (batches && Array.isArray(batches) && batches.length > 0) {
-        const batchSum = batches.reduce((sum: number, b: any) => sum + (Number(b.quantity) || 0), 0);
-        if (batchSum > 0) {
-          exportQty = batchSum;
-        }
       }
 
-      if (exportQty <= 0) {
+      if (exportQty <= 0 && (!finalQuantityKg || finalQuantityKg <= 0)) {
         return res.status(400).json({ success: false, error: 'Export quantity must be greater than 0.' });
+      }
+
+      if (exportQty <= 0 && finalQuantityKg && finalQuantityKg > 0) {
+        exportQty = finalQuantityKg;
+        finalUnit = 'kg';
       }
 
       if (!finalProduct) {
@@ -566,15 +634,6 @@ async function startServer() {
             error: `Export quantity (${exportQty.toLocaleString()} ${finalUnit}) exceeds pending obligation balance (${targetObligation.pending_quantity.toLocaleString()} ${finalUnit}). Please confirm excess allocation.`
           });
         }
-      } else {
-        const totalPending = obligations.reduce((sum, o) => sum + Number(o.pending_quantity || 0), 0);
-        if (totalPending > 0 && exportQty > totalPending && !allow_excess) {
-          return res.status(400).json({
-            success: false,
-            warning: true,
-            error: `Export quantity (${exportQty.toLocaleString()} ${finalUnit}) exceeds total pending obligation balance on this licence (${totalPending.toLocaleString()} ${finalUnit}). Please confirm excess allocation.`
-          });
-        }
       }
 
       const createdExport = await dbService.createExport({
@@ -587,6 +646,10 @@ async function startServer() {
         product: finalProduct,
         quantity: exportQty,
         unit: finalUnit,
+        quantity_vials: finalQuantityVials,
+        quantity_kg: finalQuantityKg,
+        total_value_inr: finalTotalValInr,
+        total_value_usd: finalTotalValUsd,
         gross_quantity: gross_quantity ? Number(gross_quantity) : undefined,
         net_quantity: net_quantity ? Number(net_quantity) : undefined,
         shipping_bill_number: shipping_bill_number ? shipping_bill_number.trim() : '',
@@ -607,6 +670,9 @@ async function startServer() {
 
   app.delete('/api/exports/:id', async (req, res) => {
     try {
+      if (!checkAdminPassword(req)) {
+        return res.status(403).json({ success: false, error: 'Admin Authorization Required: Invalid secret password. Export deletion blocked.' });
+      }
       await dbService.deleteExport(req.params.id);
       res.json({ success: true, message: 'Export deleted and obligation balance restored.' });
     } catch (err: any) {
@@ -842,6 +908,9 @@ async function startServer() {
 
   app.delete('/api/documents/:id', async (req, res) => {
     try {
+      if (!checkAdminPassword(req)) {
+        return res.status(403).json({ success: false, error: 'Admin Authorization Required: Invalid secret password. Document deletion blocked.' });
+      }
       const authHeader = req.headers['authorization'];
       const token = (authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null) || googleDriveService.getActiveToken() || undefined;
       await dbService.deleteDocument(req.params.id, token);

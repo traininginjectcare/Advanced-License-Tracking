@@ -32,6 +32,8 @@ export const NewImportModal: React.FC<NewImportModalProps> = ({
   const [importDate, setImportDate] = useState(new Date().toISOString().split('T')[0]);
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [supplier, setSupplier] = useState('');
+  const [valueUsd, setValueUsd] = useState('');
+  const [valueInr, setValueInr] = useState('');
   const [billOfEntryNumber, setBillOfEntryNumber] = useState('');
   const [remarks, setRemarks] = useState('');
   const [boeFile, setBoeFile] = useState<File | null>(null);
@@ -147,7 +149,7 @@ export const NewImportModal: React.FC<NewImportModalProps> = ({
     setProductLines(prev => prev.filter(l => l.id !== id));
   };
 
-  // Obligation previews across all product lines
+  // Obligation previews across all product lines with precise decimals
   const obligationSummary = useMemo(() => {
     let totalQty = 0;
     let totalObligation = 0;
@@ -160,11 +162,13 @@ export const NewImportModal: React.FC<NewImportModalProps> = ({
       if (prod && qty > 0) {
         let lineOb = 0;
         if (prod.approved_quantity > 0 && prod.net_obligation_quantity > 0) {
-          lineOb = Math.round(qty * (prod.net_obligation_quantity / prod.approved_quantity));
+          lineOb = qty * (prod.net_obligation_quantity / prod.approved_quantity);
+        } else if (prod.approved_quantity > 0 && prod.wastage_quantity !== undefined && prod.wastage_quantity > 0) {
+          const netQty = Math.max(0, prod.approved_quantity - prod.wastage_quantity);
+          lineOb = qty * (netQty / prod.approved_quantity);
         } else {
           const ratio = prod.conversion_ratio || 1;
-          const wastage = prod.wastage_percentage || 0;
-          lineOb = Math.round(qty * ratio * (1 - wastage / 100));
+          lineOb = qty * ratio;
         }
         totalObligation += lineOb;
 
@@ -226,6 +230,8 @@ export const NewImportModal: React.FC<NewImportModalProps> = ({
         supplier: supplier.trim(),
         quantity: itemsPayload.reduce((sum, it) => sum + it.quantity, 0),
         unit: validLines[0].unit,
+        value_usd: valueUsd ? parseFloat(valueUsd) : undefined,
+        value_inr: valueInr ? parseFloat(valueInr) : undefined,
         bill_of_entry_number: billOfEntryNumber ? billOfEntryNumber.trim() : undefined,
         remarks: remarks.trim(),
         allow_overdraw: allowOverdraw,
@@ -457,7 +463,46 @@ export const NewImportModal: React.FC<NewImportModalProps> = ({
             </div>
           </div>
 
-          {/* Section 2: Multi-Product Lines Section */}
+          {/* Section 2: Financial Values (USD & INR) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                Value in USD ($) <span className="text-slate-400 font-normal">(Manual Entry)</span>
+              </label>
+              <div className="relative flex items-center">
+                <span className="absolute left-2.5 text-xs text-slate-400 font-mono pointer-events-none">$</span>
+                <input
+                  id="import-value-usd-input"
+                  type="number"
+                  step="any"
+                  value={valueUsd}
+                  onChange={(e) => setValueUsd(e.target.value)}
+                  placeholder="e.g. 24500.00"
+                  className="w-full text-xs pl-7 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-sky-600 outline-none font-mono"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                Value in INR (₹) <span className="text-slate-400 font-normal">(Manual Entry)</span>
+              </label>
+              <div className="relative flex items-center">
+                <span className="absolute left-2.5 text-xs text-slate-400 font-mono pointer-events-none">₹</span>
+                <input
+                  id="import-value-inr-input"
+                  type="number"
+                  step="any"
+                  value={valueInr}
+                  onChange={(e) => setValueInr(e.target.value)}
+                  placeholder="e.g. 2050000.00"
+                  className="w-full text-xs pl-7 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-sky-600 outline-none font-mono"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Multi-Product Lines Section */}
           <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/60 space-y-3">
             <div className="flex items-center justify-between border-b border-slate-200 pb-2">
               <div>
@@ -481,9 +526,13 @@ export const NewImportModal: React.FC<NewImportModalProps> = ({
               let lineObQty = 0;
               if (prod && lineQty > 0) {
                 if (prod.approved_quantity > 0 && prod.net_obligation_quantity > 0) {
-                  lineObQty = Math.round(lineQty * (prod.net_obligation_quantity / prod.approved_quantity));
+                  lineObQty = lineQty * (prod.net_obligation_quantity / prod.approved_quantity);
+                } else if (prod.approved_quantity > 0 && prod.wastage_quantity !== undefined && prod.wastage_quantity > 0) {
+                  const netQty = Math.max(0, prod.approved_quantity - prod.wastage_quantity);
+                  lineObQty = lineQty * (netQty / prod.approved_quantity);
                 } else {
-                  lineObQty = Math.round(lineQty * (prod.conversion_ratio || 1) * (1 - (prod.wastage_percentage || 0) / 100));
+                  const ratio = prod.conversion_ratio || 1;
+                  lineObQty = lineQty * ratio;
                 }
               }
 
@@ -522,7 +571,7 @@ export const NewImportModal: React.FC<NewImportModalProps> = ({
                         <option value="">Select Product Line</option>
                         {products.map(p => (
                           <option key={p.id} value={p.id}>
-                            {p.product_name} (Approved: {formatNumber(p.approved_quantity)} {p.unit})
+                            {p.product_name} (Approved: {formatNumber(p.approved_quantity, '0', 3)} {p.unit})
                           </option>
                         ))}
                       </select>
@@ -539,7 +588,7 @@ export const NewImportModal: React.FC<NewImportModalProps> = ({
                           step="any"
                           value={line.quantity}
                           onChange={(e) => handleProductLineChange(line.id, 'quantity', e.target.value)}
-                          placeholder="e.g. 100"
+                          placeholder="e.g. 100.500"
                           className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-md focus:ring-1 focus:ring-sky-600 outline-none font-mono"
                           required
                         />
@@ -555,7 +604,7 @@ export const NewImportModal: React.FC<NewImportModalProps> = ({
                         Export Obligation
                       </label>
                       <div className="text-xs px-2.5 py-1.5 bg-slate-100 border border-slate-200 rounded-md text-sky-800 font-mono font-semibold truncate">
-                        {lineObQty > 0 ? `${formatNumber(lineObQty)} units` : '—'}
+                        {lineObQty > 0 ? `${formatNumber(lineObQty, '0', 3)} units` : '—'}
                       </div>
                     </div>
                   </div>
@@ -563,27 +612,26 @@ export const NewImportModal: React.FC<NewImportModalProps> = ({
               );
             })}
 
-            {/* Obligation Engine Calculation Summary */}
+            {/* Obligation Summary (Clean without formula badges) */}
             {obligationSummary.totalQty > 0 && (
               <div className="p-3 bg-sky-50 border border-sky-200 rounded-lg text-xs space-y-1.5">
                 <div className="flex items-center justify-between font-semibold text-sky-900 border-b border-sky-200 pb-1">
                   <span className="flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-sky-700" />
-                    Automated SION Obligation Generation Summary
+                    Calculated Export Obligation
                   </span>
-                  <span className="text-sky-700 font-mono text-[11px]">DGFT Standard Norms</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 pt-1 text-slate-700">
                   <div>
                     <span className="text-slate-500 text-[11px] block">Total Import Quantity:</span>
                     <span className="font-semibold text-slate-900 font-mono">
-                      {formatNumber(obligationSummary.totalQty)}
+                      {formatNumber(obligationSummary.totalQty, '0', 3)}
                     </span>
                   </div>
                   <div>
                     <span className="text-slate-500 text-[11px] block">Generated Obligation:</span>
                     <span className="font-bold text-sky-800 font-mono">
-                      {formatNumber(obligationSummary.totalObligation)} finished units
+                      {formatNumber(obligationSummary.totalObligation, '0', 3)} finished units
                     </span>
                   </div>
                   <div>

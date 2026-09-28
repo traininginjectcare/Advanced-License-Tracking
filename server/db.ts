@@ -390,6 +390,8 @@ class DatabaseService {
       supplier: data.supplier.trim(),
       quantity: Number(data.quantity),
       unit: data.unit,
+      value_usd: data.value_usd !== undefined && data.value_usd !== null ? Number(data.value_usd) : undefined,
+      value_inr: data.value_inr !== undefined && data.value_inr !== null ? Number(data.value_inr) : undefined,
       bill_of_entry_number: data.bill_of_entry_number ? data.bill_of_entry_number.trim() : '',
       remarks: data.remarks || '',
       items: data.items,
@@ -565,6 +567,10 @@ class DatabaseService {
       product: data.product.trim(),
       quantity: exportQty,
       unit: data.unit,
+      quantity_vials: data.quantity_vials !== undefined && data.quantity_vials !== null ? Number(data.quantity_vials) : undefined,
+      quantity_kg: data.quantity_kg !== undefined && data.quantity_kg !== null ? Number(data.quantity_kg) : undefined,
+      total_value_inr: data.total_value_inr !== undefined && data.total_value_inr !== null ? Number(data.total_value_inr) : undefined,
+      total_value_usd: data.total_value_usd !== undefined && data.total_value_usd !== null ? Number(data.total_value_usd) : undefined,
       gross_quantity: data.gross_quantity,
       net_quantity: data.net_quantity,
       shipping_bill_number: data.shipping_bill_number ? data.shipping_bill_number.trim() : '',
@@ -587,32 +593,54 @@ class DatabaseService {
         } else if (newCompleted > 0) {
           newStatus = new Date(ob.due_date).getTime() < Date.now() ? 'Overdue' : 'Partially Fulfilled';
         }
-        ob.completed_quantity = Number(newCompleted.toFixed(2));
-        ob.pending_quantity = Number(newPending.toFixed(2));
+        ob.completed_quantity = Number(newCompleted.toFixed(3));
+        ob.pending_quantity = Number(newPending.toFixed(3));
         ob.status = newStatus;
         ob.updated_at = now;
         updatedObs.push(ob);
       }
     } else {
-      // Unlinked export: fulfill licence's pending obligations in FIFO order (by earliest due date)
-      let remainingToFulfill = exportQty;
+      // Unlinked export: fulfill licence's pending obligations
+      // In pharma injectables, both medicine (kg) and vials are consumed in finished goods.
+      const kgFulfill = data.quantity_kg !== undefined && data.quantity_kg > 0 ? Number(data.quantity_kg) : 0;
+      const vialsFulfill = data.quantity_vials !== undefined && data.quantity_vials > 0 ? Number(data.quantity_vials) : 0;
+
+      let remainingKg = kgFulfill;
+      let remainingVials = vialsFulfill;
+      let remainingGeneral = exportQty;
+
       const licenceObs = this.localDb.export_obligations
         .filter(o => o.licence_id === data.licence_id && o.pending_quantity > 0)
         .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime());
 
       for (const ob of licenceObs) {
-        if (remainingToFulfill <= 0) break;
-        const fulfillAmt = Math.min(ob.pending_quantity, remainingToFulfill);
-        ob.completed_quantity = Number(((ob.completed_quantity || 0) + fulfillAmt).toFixed(2));
-        ob.pending_quantity = Number(Math.max(0, ob.required_quantity - ob.completed_quantity).toFixed(2));
-        if (ob.completed_quantity >= ob.required_quantity) {
-          ob.status = 'Completed';
-        } else if (ob.completed_quantity > 0) {
-          ob.status = new Date(ob.due_date).getTime() < Date.now() ? 'Overdue' : 'Partially Fulfilled';
+        const imp = this.localDb.imports.find(i => i.id === ob.import_id);
+        const prod = imp?.licence_product_id ? this.localDb.licence_products.find(p => p.id === imp.licence_product_id) : undefined;
+        const unitLower = (prod?.unit || imp?.unit || ob.unit || '').toLowerCase();
+
+        let fulfillAmt = 0;
+        if (remainingKg > 0 && (unitLower.includes('kg') || unitLower.includes('gm'))) {
+          fulfillAmt = Math.min(ob.pending_quantity, remainingKg);
+          remainingKg -= fulfillAmt;
+        } else if (remainingVials > 0 && (unitLower.includes('vial') || unitLower.includes('pc') || unitLower.includes('unit') || unitLower.includes('pack'))) {
+          fulfillAmt = Math.min(ob.pending_quantity, remainingVials);
+          remainingVials -= fulfillAmt;
+        } else if (remainingGeneral > 0) {
+          fulfillAmt = Math.min(ob.pending_quantity, remainingGeneral);
+          remainingGeneral -= fulfillAmt;
         }
-        ob.updated_at = now;
-        remainingToFulfill -= fulfillAmt;
-        updatedObs.push(ob);
+
+        if (fulfillAmt > 0) {
+          ob.completed_quantity = Number(((ob.completed_quantity || 0) + fulfillAmt).toFixed(3));
+          ob.pending_quantity = Number(Math.max(0, ob.required_quantity - ob.completed_quantity).toFixed(3));
+          if (ob.completed_quantity >= ob.required_quantity) {
+            ob.status = 'Completed';
+          } else if (ob.completed_quantity > 0) {
+            ob.status = new Date(ob.due_date).getTime() < Date.now() ? 'Overdue' : 'Partially Fulfilled';
+          }
+          ob.updated_at = now;
+          updatedObs.push(ob);
+        }
       }
     }
 

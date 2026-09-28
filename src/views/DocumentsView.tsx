@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { DocumentRecord, DocumentType } from '../types/index.ts';
 import { api } from '../api/client.ts';
+import { AdminDeleteConfirmModal } from '../components/AdminDeleteConfirmModal.tsx';
 import { formatDateTime } from '../utils/format.ts';
 import { 
   FileText, 
@@ -29,6 +30,7 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('All');
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; file_name: string; document_type: string } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -43,16 +45,6 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
       console.error(err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Are you sure you want to delete document "${name}"?`)) return;
-    try {
-      await api.deleteDocument(id);
-      loadData();
-    } catch (err: any) {
-      alert(err.message);
     }
   };
 
@@ -193,9 +185,9 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                         </a>
                         <button
                           type="button"
-                          onClick={() => handleDelete(doc.id, doc.file_name)}
-                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded"
-                          title="Delete Document"
+                          onClick={() => setDeleteTarget({ id: doc.id, file_name: doc.file_name, document_type: doc.document_type })}
+                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded cursor-pointer"
+                          title="Delete Document (Requires Admin Password)"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -208,6 +200,21 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Admin Protected Deletion Modal */}
+      <AdminDeleteConfirmModal
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete Statutory Compliance Document"
+        itemIdentifier={`${deleteTarget?.document_type}: ${deleteTarget?.file_name}`}
+        consequenceText="Deleting this document will remove it from the compliance repository and mark associated checklist items as missing/pending."
+        onConfirm={async (password) => {
+          if (deleteTarget) {
+            await api.deleteDocument(deleteTarget.id, password);
+            await loadData();
+          }
+        }}
+      />
     </div>
   );
 };

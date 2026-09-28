@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Licence, LicenceCalculations } from '../types/index.ts';
 import { api } from '../api/client.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
+import { AdminDeleteConfirmModal } from '../components/AdminDeleteConfirmModal.tsx';
 import { formatNumber } from '../utils/format.ts';
 import { 
   Award, 
@@ -32,6 +33,7 @@ export const LicencesView: React.FC<LicencesViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; licence_number: string } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -46,18 +48,6 @@ export const LicencesView: React.FC<LicencesViewProps> = ({
       console.error(err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleDelete = async (id: string, num: string) => {
-    if (!confirm(`Are you sure you want to delete Advance Authorisation "${num}"? All linked imports, obligations, and exports will be deleted.`)) {
-      return;
-    }
-    try {
-      await api.deleteLicence(id);
-      loadData();
-    } catch (err: any) {
-      alert(err.message);
     }
   };
 
@@ -220,9 +210,9 @@ export const LicencesView: React.FC<LicencesViewProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDelete(l.id, l.licence_number)}
-                            className="p-1.5 text-rose-600 hover:bg-rose-50 rounded transition-colors"
-                            title="Delete Licence"
+                            onClick={() => setDeleteTarget({ id: l.id, licence_number: l.licence_number })}
+                            className="p-1.5 text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
+                            title="Delete Licence (Requires Admin Password)"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -236,6 +226,21 @@ export const LicencesView: React.FC<LicencesViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Admin Protected Deletion Modal */}
+      <AdminDeleteConfirmModal
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete Advance Authorisation Licence"
+        itemIdentifier={`Licence: ${deleteTarget?.licence_number || ''}`}
+        consequenceText="CRITICAL: Deleting this master licence will permanently delete all associated duty-free imports, export obligations, allocations, and documentation records."
+        onConfirm={async (password) => {
+          if (deleteTarget) {
+            await api.deleteLicence(deleteTarget.id, password);
+            await loadData();
+          }
+        }}
+      />
     </div>
   );
 };

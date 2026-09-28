@@ -14,15 +14,16 @@ interface NewExportModalProps {
 interface BatchItem {
   id: string;
   batch_number: string;
-  quantity: string;
+  quantity_kg: string;
+  quantity_vials: string;
 }
 
 interface ExportProductLine {
   id: string;
   product: string;
   unit: string;
-  directQuantity: string;
-  grossQuantityOverride?: string;
+  directQuantityKg: string;
+  directQuantityVials: string;
   batches: BatchItem[];
 }
 
@@ -48,18 +49,20 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
   const [exportType, setExportType] = useState<ExportType>('Direct Export');
   const [partyName, setPartyName] = useState('');
   const [shippingBillNumber, setShippingBillNumber] = useState('');
+  const [valueUsd, setValueUsd] = useState('');
+  const [valueInr, setValueInr] = useState('');
   const [remarks, setRemarks] = useState('');
   const [generateDeec, setGenerateDeec] = useState(false);
 
-  // Multi-Product Lines with Batch Numbers
+  // Multi-Product Lines with Batch Numbers (Merging Powder and Vials into finished good)
   const [productLines, setProductLines] = useState<ExportProductLine[]>([
     {
       id: 'prod-1',
       product: '',
       unit: 'vials',
-      directQuantity: '',
-      grossQuantityOverride: '',
-      batches: [{ id: 'batch-1', batch_number: '', quantity: '' }]
+      directQuantityKg: '',
+      directQuantityVials: '',
+      batches: [{ id: 'batch-1', batch_number: '', quantity_kg: '', quantity_vials: '' }]
     }
   ]);
 
@@ -124,8 +127,9 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
             id: 'prod-1',
             product: prods[0].product_name,
             unit: prods[0].unit || 'vials',
-            directQuantity: '',
-            batches: [{ id: 'batch-1', batch_number: '', quantity: '' }]
+            directQuantityKg: '',
+            directQuantityVials: '',
+            batches: [{ id: 'batch-1', batch_number: '', quantity_kg: '', quantity_vials: '' }]
           }
         ]);
       }
@@ -174,16 +178,21 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
     setProductLines(prev => prev.map(line => line.id === lineId ? { ...line, unit } : line));
   };
 
-  const handleDirectQuantityChange = (lineId: string, qty: string) => {
-    setProductLines(prev => prev.map(line => line.id === lineId ? { ...line, directQuantity: qty } : line));
+  const handleDirectQuantityKgChange = (lineId: string, qty: string) => {
+    setProductLines(prev => prev.map(line => line.id === lineId ? { ...line, directQuantityKg: qty } : line));
   };
 
-  const handleGrossOverrideChange = (lineId: string, val: string) => {
-    setProductLines(prev => prev.map(line => line.id === lineId ? { ...line, grossQuantityOverride: val } : line));
+  const handleDirectQuantityVialsChange = (lineId: string, qty: string) => {
+    setProductLines(prev => prev.map(line => line.id === lineId ? { ...line, directQuantityVials: qty } : line));
   };
 
   // Batch Operations per Product Line
-  const handleBatchChange = (lineId: string, batchId: string, field: 'batch_number' | 'quantity', value: string) => {
+  const handleBatchChange = (
+    lineId: string, 
+    batchId: string, 
+    field: 'batch_number' | 'quantity_kg' | 'quantity_vials', 
+    value: string
+  ) => {
     setProductLines(prev => prev.map(line => {
       if (line.id !== lineId) return line;
       const updatedBatches = line.batches.map(b => b.id === batchId ? { ...b, [field]: value } : b);
@@ -198,7 +207,7 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
         ...line,
         batches: [
           ...line.batches,
-          { id: `batch-${Date.now()}-${Math.random()}`, batch_number: '', quantity: '' }
+          { id: `batch-${Date.now()}-${Math.random()}`, batch_number: '', quantity_kg: '', quantity_vials: '' }
         ]
       };
     }));
@@ -224,9 +233,9 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
         id: `prod-${Date.now()}-${Math.random()}`,
         product: nextProd?.product_name || '',
         unit: nextProd?.unit || 'vials',
-        directQuantity: '',
-        grossQuantityOverride: '',
-        batches: [{ id: `batch-${Date.now()}`, batch_number: '', quantity: '' }]
+        directQuantityKg: '',
+        directQuantityVials: '',
+        batches: [{ id: `batch-${Date.now()}`, batch_number: '', quantity_kg: '', quantity_vials: '' }]
       }
     ]);
   };
@@ -236,49 +245,35 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
     setProductLines(prev => prev.filter(l => l.id !== lineId));
   };
 
-  // Auto-calculated Line and Total Quantities (Net and Gross according to licence SION norms)
+  // Auto-calculated Line and Total Quantities for merged goods (Medicine in kg + Containers in vials)
   const computedProductLines = useMemo(() => {
     return productLines.map(line => {
-      const batchSum = line.batches.reduce((sum, b) => sum + (parseFloat(b.quantity) || 0), 0);
-      const hasBatches = line.batches.some(b => b.batch_number.trim() !== '' && parseFloat(b.quantity) > 0);
-      const netQty = hasBatches ? batchSum : (parseFloat(line.directQuantity) || 0);
+      const hasBatches = line.batches.some(
+        b => b.batch_number.trim() !== '' && ((parseFloat(b.quantity_kg) || 0) > 0 || (parseFloat(b.quantity_vials) || 0) > 0)
+      );
 
-      // Match with licence product to auto-derive gross quantity from permitted wastage or conversion
-      const matchedProd = licenceProducts.find(
-        p => p.product_name.toLowerCase().trim() === line.product.toLowerCase().trim()
-      ) || licenceProducts[0];
+      const batchKgSum = line.batches.reduce((sum, b) => sum + (parseFloat(b.quantity_kg) || 0), 0);
+      const batchVialsSum = line.batches.reduce((sum, b) => sum + (parseFloat(b.quantity_vials) || 0), 0);
 
-      const wastage = matchedProd?.wastage_percentage || 0;
-      let calculatedGross = netQty;
-      if (wastage > 0 && wastage < 100) {
-        calculatedGross = Math.round(netQty / (1 - wastage / 100));
-      } else if (matchedProd?.gross_obligation_quantity && matchedProd?.net_obligation_quantity && matchedProd.net_obligation_quantity > 0) {
-        calculatedGross = Math.round(netQty * (matchedProd.gross_obligation_quantity / matchedProd.net_obligation_quantity));
-      }
-
-      const grossQty = (line.grossQuantityOverride && line.grossQuantityOverride.trim() !== '')
-        ? (parseFloat(line.grossQuantityOverride) || calculatedGross)
-        : calculatedGross;
+      const netKg = hasBatches ? batchKgSum : (parseFloat(line.directQuantityKg) || 0);
+      const netVials = hasBatches ? batchVialsSum : (parseFloat(line.directQuantityVials) || 0);
 
       return {
         ...line,
-        netQty,
-        grossQty,
-        calculatedGross,
-        wastage,
-        matchedProd,
-        effectiveQty: netQty,
+        netKg,
+        netVials,
+        effectiveQty: netVials > 0 ? netVials : netKg,
         hasBatches
       };
     });
-  }, [productLines, licenceProducts]);
+  }, [productLines]);
 
-  const grandTotalQuantity = useMemo(() => {
-    return computedProductLines.reduce((sum, l) => sum + l.netQty, 0);
+  const grandTotalKg = useMemo(() => {
+    return computedProductLines.reduce((sum, l) => sum + l.netKg, 0);
   }, [computedProductLines]);
 
-  const grandTotalGrossQuantity = useMemo(() => {
-    return computedProductLines.reduce((sum, l) => sum + l.grossQty, 0);
+  const grandTotalVials = useMemo(() => {
+    return computedProductLines.reduce((sum, l) => sum + l.netVials, 0);
   }, [computedProductLines]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -298,12 +293,12 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
       return;
     }
 
-    if (grandTotalQuantity <= 0) {
-      setError('Please provide valid export quantities or batch quantities (greater than 0).');
+    if (grandTotalKg <= 0 && grandTotalVials <= 0) {
+      setError('Please provide valid export quantities (either KGs or Vials greater than 0).');
       return;
     }
 
-    const validLines = computedProductLines.filter(l => l.product.trim() !== '' && l.effectiveQty > 0);
+    const validLines = computedProductLines.filter(l => l.product.trim() !== '' && (l.netKg > 0 || l.netVials > 0));
     if (validLines.length === 0) {
       setError('Please ensure each product line has a valid product name and quantity.');
       return;
@@ -313,27 +308,34 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
     setError(null);
 
     try {
-      // Build items payload with batches and gross/net quantities
+      // Build items payload with batches
       const itemsPayload = validLines.map(line => {
         const validBatches = line.batches
-          .filter(b => b.batch_number.trim() && parseFloat(b.quantity) > 0)
+          .filter(b => b.batch_number.trim() && ((parseFloat(b.quantity_kg) || 0) > 0 || (parseFloat(b.quantity_vials) || 0) > 0))
           .map(b => ({
             batch_number: b.batch_number.trim(),
-            quantity: parseFloat(b.quantity)
+            quantity: (parseFloat(b.quantity_vials) || 0) > 0 ? parseFloat(b.quantity_vials) : (parseFloat(b.quantity_kg) || 0),
+            quantity_kg: parseFloat(b.quantity_kg) || undefined,
+            quantity_vials: parseFloat(b.quantity_vials) || undefined
           }));
 
         return {
           product: line.product.trim(),
-          quantity: line.netQty,
-          net_quantity: line.netQty,
-          gross_quantity: line.grossQty,
-          unit: line.unit,
+          quantity: line.netVials > 0 ? line.netVials : line.netKg,
+          net_quantity: line.netVials > 0 ? line.netVials : line.netKg,
+          gross_quantity: line.netVials > 0 ? line.netVials : line.netKg,
+          quantity_kg: line.netKg > 0 ? line.netKg : undefined,
+          quantity_vials: line.netVials > 0 ? line.netVials : undefined,
+          unit: line.netVials > 0 ? 'vials' : 'kg',
           batches: validBatches.length > 0 ? validBatches : undefined
         };
       });
 
       // Flat list of all batches
       const allBatches = itemsPayload.flatMap(it => it.batches || []);
+
+      const primaryQty = grandTotalVials > 0 ? grandTotalVials : grandTotalKg;
+      const primaryUnit = grandTotalVials > 0 ? 'vials' : 'kg';
 
       const res = await api.createExport({
         licence_id: selectedLicenceId,
@@ -342,11 +344,15 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
         invoice_number: invoiceNumber.trim(),
         export_type: exportType,
         party_name: partyName.trim(),
-        product: itemsPayload.map(it => `${it.product} (${formatNumber(it.quantity)} ${it.unit})`).join(', '),
-        quantity: grandTotalQuantity,
-        net_quantity: grandTotalQuantity,
-        gross_quantity: grandTotalGrossQuantity,
-        unit: validLines[0].unit,
+        product: itemsPayload.map(it => it.product).join(', '),
+        quantity: primaryQty,
+        net_quantity: primaryQty,
+        gross_quantity: primaryQty,
+        quantity_kg: grandTotalKg > 0 ? grandTotalKg : undefined,
+        quantity_vials: grandTotalVials > 0 ? grandTotalVials : undefined,
+        unit: primaryUnit,
+        value_usd: valueUsd ? parseFloat(valueUsd) : undefined,
+        value_inr: valueInr ? parseFloat(valueInr) : undefined,
         shipping_bill_number: shippingBillNumber ? shippingBillNumber.trim() : undefined,
         remarks: remarks.trim(),
         allow_excess: allowExcess,
@@ -630,16 +636,54 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
             )}
           </div>
 
+          {/* Export Consignment Values in USD and INR (Manual Entry) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                Export Consignment Value in USD ($)
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-2 text-slate-400 font-mono text-xs">$</span>
+                <input
+                  id="export-value-usd-input"
+                  type="number"
+                  step="any"
+                  value={valueUsd}
+                  onChange={(e) => setValueUsd(e.target.value)}
+                  placeholder="e.g. 15000.00"
+                  className="w-full text-xs pl-7 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-emerald-600 outline-none font-mono"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                Export Consignment Value in INR (₹)
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-2 text-slate-400 font-mono text-xs">₹</span>
+                <input
+                  id="export-value-inr-input"
+                  type="number"
+                  step="any"
+                  value={valueInr}
+                  onChange={(e) => setValueInr(e.target.value)}
+                  placeholder="e.g. 1250000.00"
+                  className="w-full text-xs pl-7 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-emerald-600 outline-none font-mono"
+                />
+              </div>
+            </div>
+          </div>
+
           {/* Section 4: Multi-Product Lines with Internal Batch Numbers & Auto-Totaling */}
           <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/60 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
               <div>
                 <h4 className="text-xs font-semibold text-slate-900 flex items-center gap-1.5">
                   <Layers className="w-4 h-4 text-emerald-700" />
-                  Export Product Lines & Internal Batch Numbers
+                  Finished Product Lines & Batches (Medicine in KGs & Vials)
                 </h4>
                 <p className="text-[11px] text-slate-500">
-                  Specify exported products with batch-level breakdown. Quantities auto-total automatically.
+                  Medicine powder and vials merge into 1 finished export good. Specify quantities in both Kgs and Vials.
                 </p>
               </div>
               <button
@@ -661,7 +705,7 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
               >
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                   <span className="text-xs font-semibold text-slate-800">
-                    Product Line #{pIdx + 1}
+                    Finished Product #{pIdx + 1}
                   </span>
                   {productLines.length > 1 && (
                     <button
@@ -679,7 +723,7 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
                   {/* Product Name */}
                   <div className="md:col-span-8">
                     <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                      Finished Product Name <span className="text-rose-500">*</span>
+                      Finished Product Name (Combined Medicine + Vials) <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="text"
@@ -700,13 +744,13 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
                   {/* Unit */}
                   <div className="md:col-span-4">
                     <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                      Unit
+                      Packaging Unit
                     </label>
                     <input
                       type="text"
                       value={line.unit}
                       onChange={(e) => handleUnitChange(line.id, e.target.value)}
-                      placeholder="e.g. vials, ampoules, kg"
+                      placeholder="e.g. vials, ampoules"
                       className="w-full text-xs px-3 py-1.5 border border-slate-300 rounded-md focus:ring-1 focus:ring-emerald-600 outline-none font-mono"
                     />
                   </div>
@@ -716,7 +760,7 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
                 <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-semibold text-slate-700">
-                      Internal Batch Numbers & Pack Quantities
+                      Batch Details (Quantity in KGs & Quantity in Vials)
                     </span>
                     <button
                       type="button"
@@ -729,9 +773,16 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
                   </div>
 
                   <div className="space-y-2">
+                    <div className="grid grid-cols-12 gap-2 text-[10px] font-semibold text-slate-500 uppercase px-1">
+                      <div className="col-span-4">Batch Number</div>
+                      <div className="col-span-4">Qty in Kgs (Medicine)</div>
+                      <div className="col-span-3">Qty in Vials</div>
+                      <div className="col-span-1 text-center"></div>
+                    </div>
+
                     {line.batches.map((batch, bIdx) => (
                       <div key={batch.id} className="grid grid-cols-12 gap-2 items-center">
-                        <div className="col-span-6">
+                        <div className="col-span-4">
                           <input
                             type="text"
                             value={batch.batch_number}
@@ -740,15 +791,31 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
                             className="w-full text-xs px-2.5 py-1.5 border border-slate-300 bg-white rounded-md focus:ring-1 focus:ring-emerald-600 outline-none font-mono uppercase"
                           />
                         </div>
-                        <div className="col-span-5">
-                          <input
-                            type="number"
-                            step="any"
-                            value={batch.quantity}
-                            onChange={(e) => handleBatchChange(line.id, batch.id, 'quantity', e.target.value)}
-                            placeholder="Batch quantity"
-                            className="w-full text-xs px-2.5 py-1.5 border border-slate-300 bg-white rounded-md focus:ring-1 focus:ring-emerald-600 outline-none font-mono"
-                          />
+                        <div className="col-span-4">
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step="any"
+                              value={batch.quantity_kg}
+                              onChange={(e) => handleBatchChange(line.id, batch.id, 'quantity_kg', e.target.value)}
+                              placeholder="Qty in Kgs"
+                              className="w-full text-xs pl-2 pr-7 py-1.5 border border-slate-300 bg-white rounded-md focus:ring-1 focus:ring-emerald-600 outline-none font-mono text-right"
+                            />
+                            <span className="absolute right-2 top-1.5 text-[10px] text-slate-400 font-mono">kg</span>
+                          </div>
+                        </div>
+                        <div className="col-span-3">
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step="any"
+                              value={batch.quantity_vials}
+                              onChange={(e) => handleBatchChange(line.id, batch.id, 'quantity_vials', e.target.value)}
+                              placeholder="Qty in Vials"
+                              className="w-full text-xs pl-2 pr-10 py-1.5 border border-slate-300 bg-white rounded-md focus:ring-1 focus:ring-emerald-600 outline-none font-mono text-right"
+                            />
+                            <span className="absolute right-2 top-1.5 text-[10px] text-slate-400 font-mono">vials</span>
+                          </div>
                         </div>
                         <div className="col-span-1 text-center">
                           {line.batches.length > 1 && (
@@ -766,86 +833,88 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
                     ))}
                   </div>
 
-                  {/* Line Total Auto-Calculation Display: Net and Gross Obligation */}
-                  <div className="pt-2 border-t border-slate-200/80 space-y-2 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600 text-[11px] font-medium">
-                        {line.hasBatches ? 'Total Net Quantity (sum of batches):' : 'Net Export Consignment Quantity:'}
-                      </span>
-                      {line.hasBatches ? (
-                        <span className="font-mono font-bold text-emerald-800 text-sm">
-                          {formatNumber(line.netQty)} {line.unit}
-                        </span>
-                      ) : (
-                        <div className="w-36">
-                          <input
-                            type="number"
-                            step="any"
-                            value={line.directQuantity}
-                            onChange={(e) => handleDirectQuantityChange(line.id, e.target.value)}
-                            placeholder="Net quantity"
-                            className="w-full text-xs px-2.5 py-1 border border-slate-300 bg-white rounded-md font-mono font-bold text-right outline-none focus:ring-1 focus:ring-emerald-600"
-                          />
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Gross Obligation Quantity Auto-Calculated from Licence */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-emerald-50/70 border border-emerald-200/80 rounded-lg">
+                  {/* Direct Input fallback if batches not used */}
+                  {!line.hasBatches && (
+                    <div className="pt-2 border-t border-slate-200/80 grid grid-cols-2 gap-3 text-xs">
                       <div>
-                        <span className="text-[11px] font-semibold text-emerald-950 block">
-                          Gross Quantity Accounted in Licence
-                        </span>
-                        <span className="text-[10px] text-emerald-700">
-                          {line.wastage > 0 
-                            ? `Auto-computed: Net + ${line.wastage}% permitted manufacturing loss`
-                            : 'Auto-added based on Master Licence product SION norms'}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-emerald-900 text-sm">
-                          {formatNumber(line.grossQty)} {line.unit}
-                        </span>
+                        <label className="text-[11px] text-slate-600 block mb-1">Direct Consignment Qty in Kgs</label>
                         <input
                           type="number"
                           step="any"
-                          value={line.grossQuantityOverride || ''}
-                          onChange={(e) => handleGrossOverrideChange(line.id, e.target.value)}
-                          placeholder="Override gross"
-                          title="Optional manual override of gross quantity"
-                          className="w-28 text-[11px] px-2 py-1 border border-slate-300 bg-white rounded-md font-mono text-right outline-none"
+                          value={line.directQuantityKg}
+                          onChange={(e) => handleDirectQuantityKgChange(line.id, e.target.value)}
+                          placeholder="e.g. 15.250"
+                          className="w-full text-xs px-2.5 py-1.5 border border-slate-300 bg-white rounded-md font-mono"
                         />
                       </div>
+                      <div>
+                        <label className="text-[11px] text-slate-600 block mb-1">Direct Consignment Qty in Vials</label>
+                        <input
+                          type="number"
+                          step="any"
+                          value={line.directQuantityVials}
+                          onChange={(e) => handleDirectQuantityVialsChange(line.id, e.target.value)}
+                          placeholder="e.g. 25000"
+                          className="w-full text-xs px-2.5 py-1.5 border border-slate-300 bg-white rounded-md font-mono"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Line Total Auto-Calculation Display */}
+                  <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-xs">
+                    <span className="text-slate-600 text-[11px] font-medium">
+                      Product Line Total (Merged Goods):
+                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono font-bold text-emerald-800 text-xs bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        {formatNumber(line.netKg, '0', 3)} kg
+                      </span>
+                      <span className="font-mono font-bold text-blue-800 text-xs bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                        {formatNumber(line.netVials, '0', 0)} vials
+                      </span>
                     </div>
                   </div>
                 </div>
               </div>
             ))}
 
-            {/* Grand Total Quantity Auto-Calculation Banner (Net & Gross) */}
+            {/* Grand Total Quantity Auto-Calculation Banner (KGs & Vials) */}
             <div id="export-grand-total-banner" className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2 text-xs">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-emerald-700" />
                   <span className="font-semibold text-emerald-950">
-                    Total Consignment Export Quantity (Auto-Calculated):
+                    Total Export Consignment (Medicine + Vials Merged):
                   </span>
                 </div>
-                <div className="text-right">
-                  <span className="text-[11px] text-slate-500 mr-2">Net Export:</span>
-                  <span className="font-mono font-bold text-base text-emerald-800">
-                    {formatNumber(grandTotalQuantity)} {productLines[0]?.unit || 'units'}
-                  </span>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <span className="text-[10px] text-slate-500 mr-1.5">Medicine / Powder:</span>
+                    <span className="font-mono font-bold text-emerald-900 text-sm">
+                      {formatNumber(grandTotalKg, '0', 3)} kg
+                    </span>
+                  </div>
+                  <div className="text-right border-l border-emerald-200 pl-3">
+                    <span className="text-[10px] text-slate-500 mr-1.5">Finished Vials:</span>
+                    <span className="font-mono font-bold text-blue-900 text-sm">
+                      {formatNumber(grandTotalVials, '0', 0)} vials
+                    </span>
+                  </div>
                 </div>
               </div>
-              <div className="flex items-center justify-between pt-2 border-t border-emerald-200/70 text-[11px]">
-                <span className="text-emerald-800 font-medium">
-                  Total Gross Obligation Accounted in Licence:
-                </span>
-                <span className="font-mono font-bold text-emerald-950 text-sm">
-                  {formatNumber(grandTotalGrossQuantity)} {productLines[0]?.unit || 'units'}
-                </span>
-              </div>
+
+              {(valueUsd || valueInr) && (
+                <div className="flex items-center justify-between pt-2 border-t border-emerald-200/70 text-[11px]">
+                  <span className="text-emerald-800 font-medium">
+                    Declared Consignment Financial Value:
+                  </span>
+                  <div className="flex items-center gap-3 font-mono font-bold text-emerald-950">
+                    {valueUsd && <span>USD: ${formatNumber(parseFloat(valueUsd) || 0, '0', 2)}</span>}
+                    {valueInr && <span>INR: ₹{formatNumber(parseFloat(valueInr) || 0, '0', 2)}</span>}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
