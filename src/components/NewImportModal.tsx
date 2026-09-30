@@ -253,6 +253,7 @@ export const NewImportModal: React.FC<NewImportModalProps> = ({
         }
       }
 
+      window.dispatchEvent(new Event('tcms-data-updated'));
       onSuccess();
       onClose();
     } catch (err: any) {

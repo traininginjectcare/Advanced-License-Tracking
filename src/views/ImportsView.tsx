@@ -3,6 +3,8 @@ import { ImportRecord, TransactionDocumentChecklist } from '../types/index.ts';
 import { api } from '../api/client.ts';
 import { DocumentChecklistBadge } from '../components/DocumentChecklistBadge.tsx';
 import { AdminDeleteConfirmModal } from '../components/AdminDeleteConfirmModal.tsx';
+import { AdminAuthPromptModal } from '../components/AdminAuthPromptModal.tsx';
+import { EditImportModal } from '../components/EditImportModal.tsx';
 import { formatNumber } from '../utils/format.ts';
 import { 
   ArrowDownRight, 
@@ -10,7 +12,8 @@ import {
   Plus, 
   Trash2, 
   FileText,
-  ExternalLink
+  ExternalLink,
+  Edit3
 } from 'lucide-react';
 
 interface ImportsViewProps {
@@ -30,9 +33,18 @@ export const ImportsView: React.FC<ImportsViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; invoice: string; licence_number?: string } | null>(null);
+  const [authPromptImport, setAuthPromptImport] = useState<ImportRecord | null>(null);
+  const [editingImport, setEditingImport] = useState<ImportRecord | null>(null);
+  const [verifiedPassword, setVerifiedPassword] = useState('');
 
   useEffect(() => {
     loadData();
+
+    const handleDataUpdated = () => {
+      loadData();
+    };
+    window.addEventListener('tcms-data-updated', handleDataUpdated);
+    return () => window.removeEventListener('tcms-data-updated', handleDataUpdated);
   }, []);
 
   const loadData = async () => {
@@ -186,6 +198,14 @@ export const ImportsView: React.FC<ImportsViewProps> = ({
                       <div className="flex items-center justify-end gap-2">
                         <button
                           type="button"
+                          onClick={() => setAuthPromptImport(imp)}
+                          className="p-1 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded cursor-pointer"
+                          title="Edit Import Consignment (Requires Admin Password)"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => onOpenLicence(imp.licence_id)}
                           className="p-1 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded"
                           title="Open Master Licence"
@@ -209,6 +229,34 @@ export const ImportsView: React.FC<ImportsViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Admin Password Gate for Editing */}
+      <AdminAuthPromptModal
+        isOpen={!!authPromptImport}
+        onClose={() => setAuthPromptImport(null)}
+        title="Admin Authorization: Edit Import Consignment"
+        itemIdentifier={`Invoice: ${authPromptImport?.invoice_number || ''}`}
+        onSuccess={(password) => {
+          if (authPromptImport) {
+            setVerifiedPassword(password);
+            setEditingImport(authPromptImport);
+            setAuthPromptImport(null);
+          }
+        }}
+      />
+
+      {/* Edit Import Modal */}
+      {editingImport && (
+        <EditImportModal
+          importRecord={editingImport}
+          adminPassword={verifiedPassword}
+          onClose={() => setEditingImport(null)}
+          onSuccess={() => {
+            setEditingImport(null);
+            loadData();
+          }}
+        />
+      )}
 
       {/* Admin Protected Deletion Modal */}
       <AdminDeleteConfirmModal

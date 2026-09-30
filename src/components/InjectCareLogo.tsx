@@ -19,25 +19,31 @@ export const InjectCareLogo: React.FC<InjectCareLogoProps> = ({
   const [logoUrl, setLogoUrl] = useState<string>('/injectcare-logo.svg');
   const [showUploadModal, setShowUploadModal] = useState(false);
 
-  // Sync logo from localStorage or server
+  // Sync logo from server (Firestore) and sync to localStorage
   useEffect(() => {
     const updateLogo = () => {
+      // 1. Immediately show cached logo from localStorage if available
       const stored = localStorage.getItem('injectcare_custom_logo');
       if (stored) {
         setLogoUrl(stored);
-        return;
       }
-      // Check server
+
+      // 2. Always sync from server to ensure other devices/accounts manager computer get official logo
       api.getLogo()
         .then(res => {
           if (res?.hasCustomLogo && res.url) {
             setLogoUrl(res.url);
-          } else {
+            try {
+              localStorage.setItem('injectcare_custom_logo', res.url);
+            } catch (_) {}
+          } else if (!stored) {
             setLogoUrl('/injectcare-logo.svg');
           }
         })
         .catch(() => {
-          setLogoUrl('/injectcare-logo.svg');
+          if (!stored) {
+            setLogoUrl('/injectcare-logo.svg');
+          }
         });
     };
 

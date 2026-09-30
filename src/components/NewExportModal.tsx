@@ -378,6 +378,8 @@ export const NewExportModal: React.FC<NewExportModalProps> = ({
         if (nocFile) await uploadHelper(nocFile, 'NOC');
       }
 
+      window.dispatchEvent(new Event('tcms-data-updated'));
+
       // Only trigger auto DEEC modal preview if this is a Third-Party Export and user requested DEEC
       if (exportType === 'Third-Party Export' && generateDeec) {
         onSuccess(res.export);

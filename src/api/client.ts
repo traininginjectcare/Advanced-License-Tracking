@@ -103,11 +103,24 @@ export const api = {
     return json.licence;
   },
 
-  async updateLicence(id: string, updates: Partial<Licence>) {
+  // Admin Auth
+  async verifyAdminPassword(password: string): Promise<boolean> {
+    const res = await fetch('/api/auth/verify-admin-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    const json = await res.json();
+    return json.success === true;
+  },
+
+  async updateLicence(id: string, updates: any, password?: string) {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (password) headers['x-admin-password'] = password;
     const res = await fetch(`/api/licences/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
+      headers,
+      body: JSON.stringify({ ...updates, password })
     });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Failed to update licence');
@@ -163,6 +176,19 @@ export const api = {
       throw err;
     }
     return json;
+  },
+
+  async updateImport(id: string, updates: any, password?: string) {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (password) headers['x-admin-password'] = password;
+    const res = await fetch(`/api/imports/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ ...updates, password })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Failed to update import');
+    return json.import;
   },
 
   async deleteImport(id: string, password?: string) {
@@ -232,6 +258,19 @@ export const api = {
       throw err;
     }
     return json;
+  },
+
+  async updateExport(id: string, updates: any, password?: string) {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (password) headers['x-admin-password'] = password;
+    const res = await fetch(`/api/exports/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ ...updates, password })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Failed to update export');
+    return json.export;
   },
 
   async deleteExport(id: string, password?: string) {

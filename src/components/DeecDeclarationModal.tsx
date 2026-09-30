@@ -64,13 +64,20 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
   const [item1Header, setItem1Header] = useState('Item Serial No -1 (Medicine in Kg)');
   const [item2Header, setItem2Header] = useState('Item Serial No -2 (Vials in Nos)');
 
+  // Product column mode: When 1 product, show 2 columns (Gross & Net). When 2 products, show 4 columns (Item 1 & Item 2).
+  const [columnMode, setColumnMode] = useState<'1-product' | '2-products'>(
+    (exportRecord.items && exportRecord.items.length >= 2) || (licence?.products && licence.products.length >= 2)
+      ? '2-products'
+      : '1-product'
+  );
+
   // Build initial rows: batch-wise combined products (Medicine Powder in Kg + Vials in Nos merged into final export good)
   const initialRows: DeecTableRow[] = useMemo(() => {
     const totalVials = exportRecord.quantity_vials || exportRecord.net_quantity || exportRecord.quantity || 21210;
     const totalKg = exportRecord.quantity_kg || parseFloat(((totalVials * 1.20) / 1000).toFixed(2)) || 25.45;
     const combinedProduct = exportRecord.product || 'Amoxicillin for Injection (Medicine Powder & Vials Merged)';
 
-    // 1. If export record has batch breakdown, show batch-wise rows directly
+    // 1. If export record has batch breakdown, show batch-wise rows with the finished product on EVERY row
     if (exportRecord.batches && exportRecord.batches.length > 0) {
       return exportRecord.batches.map((b, idx) => {
         const bVials = b.quantity_vials || (b.quantity && b.quantity > 500 ? b.quantity : 0) || Math.round(totalVials / exportRecord.batches!.length);
@@ -81,7 +88,7 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
           id: `batch-${idx}`,
           invoice_no: exportRecord.invoice_number || `R26005${idx + 9}`,
           batch_no: b.batch_number || `B-250${idx + 1}`,
-          product: idx === 0 ? combinedProduct : '',
+          product: combinedProduct, // Display finished product name across all batches
           qty: bVials,
           qty_imported_item1: bKgImported,
           qty_exported_item1: bKg,
@@ -107,7 +114,7 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
             id: `item-batch-${idx}`,
             invoice_no: exportRecord.invoice_number || `R26005${idx + 9}`,
             batch_no: b.batch_number || `B-250${idx + 1}`,
-            product: idx === 0 ? combinedProduct : '',
+            product: b.itemProduct || combinedProduct, // Display finished product name across all batches
             qty: bVials,
             qty_imported_item1: bKgImported,
             qty_exported_item1: bKg,
@@ -141,12 +148,13 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
   const loadExactSampleData = () => {
     setAdvanceLicenceNo('0311048691');
     setDgftAuthority('DGFT DIRECTOR OF FOREIGN TRADE MUMBAI');
+    const sampleProduct = 'Amoxicillin & Potassium Clavulanate for Injection 1.2g (Medicine Powder & Vials Merged)';
     setTableRows([
       {
         id: 's-1',
         invoice_no: 'R260059',
         batch_no: 'B-2501',
-        product: 'Amoxicillin & Potassium Clavulanate for Injection 1.2g (Medicine Powder & Vials Merged)',
+        product: sampleProduct,
         qty: 21210.00,
         qty_imported_item1: 26.72,
         qty_exported_item1: 25.45,
@@ -157,7 +165,7 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
         id: 's-2',
         invoice_no: 'R260060',
         batch_no: 'B-2502',
-        product: '',
+        product: sampleProduct,
         qty: 35910.00,
         qty_imported_item1: 45.25,
         qty_exported_item1: 43.09,
@@ -168,7 +176,7 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
         id: 's-3',
         invoice_no: 'R260061',
         batch_no: 'B-2503',
-        product: '',
+        product: sampleProduct,
         qty: 50820.00,
         qty_imported_item1: 64.03,
         qty_exported_item1: 60.98,
@@ -179,7 +187,7 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
         id: 's-4',
         invoice_no: 'R260062',
         batch_no: 'B-2504',
-        product: '',
+        product: sampleProduct,
         qty: 50820.00,
         qty_imported_item1: 64.03,
         qty_exported_item1: 60.98,
@@ -195,13 +203,14 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
 
   const handleAddRow = () => {
     const nextIdx = tableRows.length + 1;
+    const defaultProd = tableRows[0]?.product || exportRecord.product || 'Finished Product';
     setTableRows(prev => [
       ...prev,
       {
         id: `row-${Date.now()}`,
         invoice_no: `R2600${60 + nextIdx}`,
         batch_no: `B-250${nextIdx}`,
-        product: '',
+        product: defaultProd,
         qty: 0,
         qty_imported_item1: 0,
         qty_exported_item1: 0,
@@ -241,13 +250,23 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
     out += `EXPORTED UNDER QUANTITY BASED ADVANCE LICENSE SCHEME AGAINST ADVANCE LICENSE No-${advanceLicenceNo} ISSUED BY ${dgftAuthority}\n`;
     out += `THE FOLLOWING MATERIALS HAVE BEEN USED FOR MANUFACTURING OF GOODS COVERED UNDER THIS SHIPMENTS,\n\n`;
 
-    out += `Invoice no\tBatch No\tProduct\tQty (Vials)\tQty -Imported Net Content ${item1Header}\tQty Exported  Net Content ${item1Header.replace('-', '')}\tQty -Imported Net Content ${item2Header}\tQty Exported  Net Content ${item2Header.replace('-', '')}\n`;
+    if (columnMode === '1-product') {
+      out += `Invoice no\tBatch No\tProduct\tQty (Vials)\tQty -Imported Gross Content (Medicine in Kg)\tQty Exported Net Content (Medicine in Kg)\n`;
 
-    tableRows.forEach(r => {
-      out += `${r.invoice_no}\t${r.batch_no || '-'}\t${r.product}\t${formatQty(r.qty)}\t${formatQty(r.qty_imported_item1)}\t${formatQty(r.qty_exported_item1)}\t${formatQty(r.qty_imported_item2)}\t${formatQty(r.qty_exported_item2)}\n`;
-    });
+      tableRows.forEach(r => {
+        out += `${r.invoice_no}\t${r.batch_no || '-'}\t${r.product}\t${formatQty(r.qty)}\t${formatQty(r.qty_imported_item1)}\t${formatQty(r.qty_exported_item1)}\n`;
+      });
 
-    out += `\nTotal\t\t\t${formatQty(totals.qty)}\t${formatQty(totals.qty_imported_item1)}\t${formatQty(totals.qty_exported_item1)}\t${formatQty(totals.qty_imported_item2)}\t${formatQty(totals.qty_exported_item2)}\n\n`;
+      out += `\nTotal\t\t\t${formatQty(totals.qty)}\t${formatQty(totals.qty_imported_item1)}\t${formatQty(totals.qty_exported_item1)}\n\n`;
+    } else {
+      out += `Invoice no\tBatch No\tProduct\tQty (Vials)\tQty -Imported Gross Content ${item1Header}\tQty Exported Net Content ${item1Header.replace('-', '')}\tQty -Imported Gross Content ${item2Header}\tQty Exported Net Content ${item2Header.replace('-', '')}\n`;
+
+      tableRows.forEach(r => {
+        out += `${r.invoice_no}\t${r.batch_no || '-'}\t${r.product}\t${formatQty(r.qty)}\t${formatQty(r.qty_imported_item1)}\t${formatQty(r.qty_exported_item1)}\t${formatQty(r.qty_imported_item2)}\t${formatQty(r.qty_exported_item2)}\n`;
+      });
+
+      out += `\nTotal\t\t\t${formatQty(totals.qty)}\t${formatQty(totals.qty_imported_item1)}\t${formatQty(totals.qty_exported_item1)}\t${formatQty(totals.qty_imported_item2)}\t${formatQty(totals.qty_exported_item2)}\n\n`;
+    }
 
     out += `This is to certify that the exempt material as listed below have been actually used in the manufacturing of the above products.\n`;
     out += `Certified that the particulars furnished above are correctly based on my verification of material used in resultant products. The process of manufacturer and records being maintained.\n`;
@@ -305,6 +324,28 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* 1 Product vs 2 Products Column Toggle as requested */}
+            <div className="flex items-center rounded-lg border border-slate-300 bg-white p-0.5 text-xs shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setColumnMode('1-product')}
+                className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors cursor-pointer ${
+                  columnMode === '1-product' ? 'bg-blue-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                1 Product (Gross & Net)
+              </button>
+              <button
+                type="button"
+                onClick={() => setColumnMode('2-products')}
+                className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors cursor-pointer ${
+                  columnMode === '2-products' ? 'bg-blue-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                2 Products (No. 1 & No. 2)
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={() => setIsEditMode(!isEditMode)}
@@ -447,18 +488,31 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
                     <th className="border-r border-slate-900 p-2 text-left w-24">Batch No.</th>
                     <th className="border-r border-slate-900 p-2 text-left min-w-[180px]">Finished Product</th>
                     <th className="border-r border-slate-900 p-2 text-right w-24">Qty (Vials)</th>
-                    <th className="border-r border-slate-900 p-2 text-right w-28">
-                      Qty -Imported Net Content {item1Header}
-                    </th>
-                    <th className="border-r border-slate-900 p-2 text-right w-28">
-                      Qty Exported Net Content {item1Header.replace('-', '')}
-                    </th>
-                    <th className="border-r border-slate-900 p-2 text-right w-28">
-                      Qty -Imported Net Content {item2Header}
-                    </th>
-                    <th className="p-2 text-right w-28">
-                      Qty Exported Net Content {item2Header.replace('-', '')}
-                    </th>
+                    {columnMode === '1-product' ? (
+                      <>
+                        <th className="border-r border-slate-900 p-2 text-right w-32">
+                          Gross Quantity (Kg)
+                        </th>
+                        <th className="p-2 text-right w-32">
+                          Net Quantity (Kg)
+                        </th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="border-r border-slate-900 p-2 text-right w-28">
+                          Qty -Imported Gross Content {item1Header}
+                        </th>
+                        <th className="border-r border-slate-900 p-2 text-right w-28">
+                          Qty Exported Net Content {item1Header.replace('-', '')}
+                        </th>
+                        <th className="border-r border-slate-900 p-2 text-right w-28">
+                          Qty -Imported Gross Content {item2Header}
+                        </th>
+                        <th className="p-2 text-right w-28">
+                          Qty Exported Net Content {item2Header.replace('-', '')}
+                        </th>
+                      </>
+                    )}
                     {isEditMode && (
                       <th className="border-l border-slate-900 p-1 text-center w-10 print:hidden">Act</th>
                     )}
@@ -504,10 +558,12 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
                             value={row.product}
                             onChange={(e) => handleRowChange(row.id, 'product', e.target.value)}
                             className="w-full border border-slate-300 px-1 py-0.5 rounded text-xs"
-                            placeholder="Product name (leave blank if continuation invoice)"
+                            placeholder="Finished product name"
                           />
                         ) : (
-                          row.product || <span className="text-slate-400 italic">"</span>
+                          <span className="font-semibold text-slate-900">
+                            {row.product || exportRecord.product || 'Finished Injectable Product'}
+                          </span>
                         )}
                       </td>
 
@@ -526,65 +582,101 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
                         )}
                       </td>
 
-                      {/* Qty - Imported Net Content Item 1 */}
-                      <td className="border-r border-slate-900 p-2 text-right font-mono align-top">
-                        {isEditMode ? (
-                          <input
-                            type="number"
-                            step="any"
-                            value={row.qty_imported_item1}
-                            onChange={(e) => handleRowChange(row.id, 'qty_imported_item1', parseFloat(e.target.value) || 0)}
-                            className="w-full border border-slate-300 px-1 py-0.5 rounded font-mono text-right text-xs"
-                          />
-                        ) : (
-                          formatQty(row.qty_imported_item1)
-                        )}
-                      </td>
+                      {columnMode === '1-product' ? (
+                        <>
+                          {/* Gross Quantity */}
+                          <td className="border-r border-slate-900 p-2 text-right font-mono align-top">
+                            {isEditMode ? (
+                              <input
+                                type="number"
+                                step="any"
+                                value={row.qty_imported_item1}
+                                onChange={(e) => handleRowChange(row.id, 'qty_imported_item1', parseFloat(e.target.value) || 0)}
+                                className="w-full border border-slate-300 px-1 py-0.5 rounded font-mono text-right text-xs"
+                              />
+                            ) : (
+                              formatQty(row.qty_imported_item1)
+                            )}
+                          </td>
 
-                      {/* Qty Exported Net Content Item 1 */}
-                      <td className="border-r border-slate-900 p-2 text-right font-mono align-top">
-                        {isEditMode ? (
-                          <input
-                            type="number"
-                            step="any"
-                            value={row.qty_exported_item1}
-                            onChange={(e) => handleRowChange(row.id, 'qty_exported_item1', parseFloat(e.target.value) || 0)}
-                            className="w-full border border-slate-300 px-1 py-0.5 rounded font-mono text-right text-xs"
-                          />
-                        ) : (
-                          formatQty(row.qty_exported_item1)
-                        )}
-                      </td>
+                          {/* Net Quantity */}
+                          <td className="p-2 text-right font-mono align-top">
+                            {isEditMode ? (
+                              <input
+                                type="number"
+                                step="any"
+                                value={row.qty_exported_item1}
+                                onChange={(e) => handleRowChange(row.id, 'qty_exported_item1', parseFloat(e.target.value) || 0)}
+                                className="w-full border border-slate-300 px-1 py-0.5 rounded font-mono text-right text-xs"
+                              />
+                            ) : (
+                              formatQty(row.qty_exported_item1)
+                            )}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          {/* Qty - Imported Gross Content Item 1 */}
+                          <td className="border-r border-slate-900 p-2 text-right font-mono align-top">
+                            {isEditMode ? (
+                              <input
+                                type="number"
+                                step="any"
+                                value={row.qty_imported_item1}
+                                onChange={(e) => handleRowChange(row.id, 'qty_imported_item1', parseFloat(e.target.value) || 0)}
+                                className="w-full border border-slate-300 px-1 py-0.5 rounded font-mono text-right text-xs"
+                              />
+                            ) : (
+                              formatQty(row.qty_imported_item1)
+                            )}
+                          </td>
 
-                      {/* Qty - Imported Net Content Item 2 */}
-                      <td className="border-r border-slate-900 p-2 text-right font-mono align-top">
-                        {isEditMode ? (
-                          <input
-                            type="number"
-                            step="any"
-                            value={row.qty_imported_item2}
-                            onChange={(e) => handleRowChange(row.id, 'qty_imported_item2', parseFloat(e.target.value) || 0)}
-                            className="w-full border border-slate-300 px-1 py-0.5 rounded font-mono text-right text-xs"
-                          />
-                        ) : (
-                          formatQty(row.qty_imported_item2)
-                        )}
-                      </td>
+                          {/* Qty Exported Net Content Item 1 */}
+                          <td className="border-r border-slate-900 p-2 text-right font-mono align-top">
+                            {isEditMode ? (
+                              <input
+                                type="number"
+                                step="any"
+                                value={row.qty_exported_item1}
+                                onChange={(e) => handleRowChange(row.id, 'qty_exported_item1', parseFloat(e.target.value) || 0)}
+                                className="w-full border border-slate-300 px-1 py-0.5 rounded font-mono text-right text-xs"
+                              />
+                            ) : (
+                              formatQty(row.qty_exported_item1)
+                            )}
+                          </td>
 
-                      {/* Qty Exported Net Content Item 2 */}
-                      <td className="p-2 text-right font-mono align-top">
-                        {isEditMode ? (
-                          <input
-                            type="number"
-                            step="any"
-                            value={row.qty_exported_item2}
-                            onChange={(e) => handleRowChange(row.id, 'qty_exported_item2', parseFloat(e.target.value) || 0)}
-                            className="w-full border border-slate-300 px-1 py-0.5 rounded font-mono text-right text-xs"
-                          />
-                        ) : (
-                          formatQty(row.qty_exported_item2)
-                        )}
-                      </td>
+                          {/* Qty - Imported Gross Content Item 2 */}
+                          <td className="border-r border-slate-900 p-2 text-right font-mono align-top">
+                            {isEditMode ? (
+                              <input
+                                type="number"
+                                step="any"
+                                value={row.qty_imported_item2}
+                                onChange={(e) => handleRowChange(row.id, 'qty_imported_item2', parseFloat(e.target.value) || 0)}
+                                className="w-full border border-slate-300 px-1 py-0.5 rounded font-mono text-right text-xs"
+                              />
+                            ) : (
+                              formatQty(row.qty_imported_item2)
+                            )}
+                          </td>
+
+                          {/* Qty Exported Net Content Item 2 */}
+                          <td className="p-2 text-right font-mono align-top">
+                            {isEditMode ? (
+                              <input
+                                type="number"
+                                step="any"
+                                value={row.qty_exported_item2}
+                                onChange={(e) => handleRowChange(row.id, 'qty_exported_item2', parseFloat(e.target.value) || 0)}
+                                className="w-full border border-slate-300 px-1 py-0.5 rounded font-mono text-right text-xs"
+                              />
+                            ) : (
+                              formatQty(row.qty_exported_item2)
+                            )}
+                          </td>
+                        </>
+                      )}
 
                       {isEditMode && (
                         <td className="border-l border-slate-900 p-1 text-center align-top print:hidden">
@@ -611,18 +703,31 @@ export const DeecDeclarationModal: React.FC<DeecDeclarationModalProps> = ({
                     <td className="border-r border-slate-900 p-2 text-right font-mono font-bold">
                       {formatQty(totals.qty)}
                     </td>
-                    <td className="border-r border-slate-900 p-2 text-right font-mono font-bold">
-                      {formatQty(totals.qty_imported_item1)}
-                    </td>
-                    <td className="border-r border-slate-900 p-2 text-right font-mono font-bold">
-                      {formatQty(totals.qty_exported_item1)}
-                    </td>
-                    <td className="border-r border-slate-900 p-2 text-right font-mono font-bold">
-                      {formatQty(totals.qty_imported_item2)}
-                    </td>
-                    <td className="p-2 text-right font-mono font-bold">
-                      {formatQty(totals.qty_exported_item2)}
-                    </td>
+                    {columnMode === '1-product' ? (
+                      <>
+                        <td className="border-r border-slate-900 p-2 text-right font-mono font-bold">
+                          {formatQty(totals.qty_imported_item1)}
+                        </td>
+                        <td className="p-2 text-right font-mono font-bold">
+                          {formatQty(totals.qty_exported_item1)}
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="border-r border-slate-900 p-2 text-right font-mono font-bold">
+                          {formatQty(totals.qty_imported_item1)}
+                        </td>
+                        <td className="border-r border-slate-900 p-2 text-right font-mono font-bold">
+                          {formatQty(totals.qty_exported_item1)}
+                        </td>
+                        <td className="border-r border-slate-900 p-2 text-right font-mono font-bold">
+                          {formatQty(totals.qty_imported_item2)}
+                        </td>
+                        <td className="p-2 text-right font-mono font-bold">
+                          {formatQty(totals.qty_exported_item2)}
+                        </td>
+                      </>
+                    )}
                     {isEditMode && <td className="border-l border-slate-900 print:hidden" />}
                   </tr>
                 </tfoot>

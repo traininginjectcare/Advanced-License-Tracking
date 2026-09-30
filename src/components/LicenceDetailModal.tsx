@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { LicenceDetailResponse, api } from '../api/client.ts';
+import { Licence, ImportRecord, ExportRecord } from '../types/index.ts';
 import { StatusBadge } from './StatusBadge.tsx';
 import { DocumentChecklistBadge } from './DocumentChecklistBadge.tsx';
 import { AdminDeleteConfirmModal } from './AdminDeleteConfirmModal.tsx';
+import { AdminAuthPromptModal } from './AdminAuthPromptModal.tsx';
+import { EditLicenceModal } from './EditLicenceModal.tsx';
+import { EditImportModal } from './EditImportModal.tsx';
+import { EditExportModal } from './EditExportModal.tsx';
 import { formatNumber } from '../utils/format.ts';
 import { 
   X, 
@@ -17,7 +22,8 @@ import {
   CheckCircle2, 
   ShieldCheck,
   Trash2,
-  ExternalLink
+  ExternalLink,
+  Edit3
 } from 'lucide-react';
 
 interface LicenceDetailModalProps {
@@ -44,6 +50,13 @@ export const LicenceDetailModal: React.FC<LicenceDetailModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'imports' | 'obligations' | 'exports' | 'documents'>('overview');
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'import' | 'export'; id: string; identifier: string } | null>(null);
+  
+  // Admin password protected edit states
+  const [authPromptTarget, setAuthPromptTarget] = useState<{ type: 'licence' | 'import' | 'export'; item: any; identifier: string } | null>(null);
+  const [verifiedPassword, setVerifiedPassword] = useState('');
+  const [editingLicence, setEditingLicence] = useState<Licence | null>(null);
+  const [editingImport, setEditingImport] = useState<ImportRecord | null>(null);
+  const [editingExport, setEditingExport] = useState<ExportRecord | null>(null);
 
   useEffect(() => {
     loadDetails();
@@ -139,6 +152,16 @@ export const LicenceDetailModal: React.FC<LicenceDetailModalProps> = ({
                 <span>Upload Licence PDF</span>
               </button>
             )}
+
+            <button
+              type="button"
+              onClick={() => setAuthPromptTarget({ type: 'licence', item: licence, identifier: `Licence: ${licence.licence_number}` })}
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-md hover:bg-amber-100 transition-colors cursor-pointer"
+              title="Edit Licence (Requires Admin Password)"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>Edit Licence</span>
+            </button>
 
             <button
               type="button"
@@ -432,14 +455,24 @@ export const LicenceDetailModal: React.FC<LicenceDetailModalProps> = ({
                             />
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() => setDeleteTarget({ type: 'import', id: imp.id, identifier: `Import Invoice: ${imp.invoice_number}` })}
-                              className="text-rose-600 hover:text-rose-800 p-1 rounded hover:bg-rose-50 cursor-pointer"
-                              title="Delete Import (Requires Admin Password)"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setAuthPromptTarget({ type: 'import', item: imp, identifier: `Import Invoice: ${imp.invoice_number}` })}
+                                className="text-amber-600 hover:text-amber-800 p-1 rounded hover:bg-amber-50 cursor-pointer"
+                                title="Edit Import (Requires Admin Password)"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteTarget({ type: 'import', id: imp.id, identifier: `Import Invoice: ${imp.invoice_number}` })}
+                                className="text-rose-600 hover:text-rose-800 p-1 rounded hover:bg-rose-50 cursor-pointer"
+                                title="Delete Import (Requires Admin Password)"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -579,14 +612,24 @@ export const LicenceDetailModal: React.FC<LicenceDetailModalProps> = ({
                             />
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() => setDeleteTarget({ type: 'export', id: exp.id, identifier: `Export Invoice: ${exp.invoice_number}` })}
-                              className="text-rose-600 hover:text-rose-800 p-1 rounded hover:bg-rose-50 cursor-pointer"
-                              title="Delete Export Shipment (Requires Admin Password)"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setAuthPromptTarget({ type: 'export', item: exp, identifier: `Export Invoice: ${exp.invoice_number}` })}
+                                className="text-amber-600 hover:text-amber-800 p-1 rounded hover:bg-amber-50 cursor-pointer"
+                                title="Edit Export (Requires Admin Password)"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteTarget({ type: 'export', id: exp.id, identifier: `Export Invoice: ${exp.invoice_number}` })}
+                                className="text-rose-600 hover:text-rose-800 p-1 rounded hover:bg-rose-50 cursor-pointer"
+                                title="Delete Export Shipment (Requires Admin Password)"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -677,6 +720,69 @@ export const LicenceDetailModal: React.FC<LicenceDetailModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Admin Password Gate for Editing */}
+      <AdminAuthPromptModal
+        isOpen={!!authPromptTarget}
+        onClose={() => setAuthPromptTarget(null)}
+        title={`Admin Authorization: Edit ${authPromptTarget?.type === 'licence' ? 'Licence' : authPromptTarget?.type === 'import' ? 'Import Consignment' : 'Export Shipment'}`}
+        itemIdentifier={authPromptTarget?.identifier || ''}
+        onSuccess={(password) => {
+          if (authPromptTarget) {
+            setVerifiedPassword(password);
+            if (authPromptTarget.type === 'licence') {
+              setEditingLicence(authPromptTarget.item);
+            } else if (authPromptTarget.type === 'import') {
+              setEditingImport(authPromptTarget.item);
+            } else if (authPromptTarget.type === 'export') {
+              setEditingExport(authPromptTarget.item);
+            }
+            setAuthPromptTarget(null);
+          }
+        }}
+      />
+
+      {/* Edit Licence Modal */}
+      {editingLicence && (
+        <EditLicenceModal
+          licence={editingLicence}
+          adminPassword={verifiedPassword}
+          onClose={() => setEditingLicence(null)}
+          onSuccess={async () => {
+            setEditingLicence(null);
+            await loadDetails();
+            onRefreshParent();
+          }}
+        />
+      )}
+
+      {/* Edit Import Modal */}
+      {editingImport && (
+        <EditImportModal
+          importRecord={editingImport}
+          adminPassword={verifiedPassword}
+          onClose={() => setEditingImport(null)}
+          onSuccess={async () => {
+            setEditingImport(null);
+            await loadDetails();
+            onRefreshParent();
+          }}
+        />
+      )}
+
+      {/* Edit Export Modal */}
+      {editingExport && (
+        <EditExportModal
+          exportRecord={editingExport}
+          adminPassword={verifiedPassword}
+          onClose={() => setEditingExport(null)}
+          onSuccess={async () => {
+            setEditingExport(null);
+            await loadDetails();
+            onRefreshParent();
+          }}
+        />
+      )}
 
       {/* Admin Protected Deletion Modal */}
       <AdminDeleteConfirmModal

@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
+import { Licence, LicenceProduct } from '../types/index.ts';
 import { api } from '../api/client.ts';
-import { X, Plus, Trash2, Award, AlertCircle, FileUp } from 'lucide-react';
+import { X, Plus, Trash2, Edit3, AlertCircle, Save } from 'lucide-react';
 
-interface NewLicenceModalProps {
+interface EditLicenceModalProps {
+  licence: Licence;
+  adminPassword?: string;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-interface ProductFormRow {
+interface EditProductFormRow {
+  id?: string;
   product_name: string;
   product_type: string;
   approved_vials: string;
@@ -21,38 +25,64 @@ interface ProductFormRow {
   obligation_period_months: string;
 }
 
-export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuccess }) => {
-  const [licenceNumber, setLicenceNumber] = useState('');
-  const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0]);
-  
-  // Default import validity: 12 months from issue
-  const defaultImportVal = new Date();
-  defaultImportVal.setMonth(defaultImportVal.getMonth() + 12);
-  const [importValidity, setImportValidity] = useState(defaultImportVal.toISOString().split('T')[0]);
+export const EditLicenceModal: React.FC<EditLicenceModalProps> = ({
+  licence,
+  adminPassword,
+  onClose,
+  onSuccess
+}) => {
+  const [licenceNumber, setLicenceNumber] = useState(licence.licence_number);
+  const [issueDate, setIssueDate] = useState(licence.issue_date);
+  const [importValidity, setImportValidity] = useState(licence.import_validity_date);
+  const [exportValidity, setExportValidity] = useState(licence.export_validity_date);
+  const [status, setStatus] = useState(licence.status);
+  const [password, setPassword] = useState(adminPassword || 'Injectcare@123');
 
-  // Default export validity: 18 months from issue
-  const defaultExportVal = new Date();
-  defaultExportVal.setMonth(defaultExportVal.getMonth() + 18);
-  const [exportValidity, setExportValidity] = useState(defaultExportVal.toISOString().split('T')[0]);
+  const initialProducts: EditProductFormRow[] = (licence.products && licence.products.length > 0)
+    ? licence.products.map(p => {
+        const vials = p.approved_vials || 0;
+        const appKg = p.approved_quantity || 0;
+        const netKg = p.net_obligation_quantity || 0;
+        let netPv = p.net_content_per_vial?.toString() || '';
+        let grossPv = p.gross_content_per_vial?.toString() || '';
+        if (vials > 0 && !netPv && netKg > 0) {
+          netPv = (netKg / vials).toFixed(7).replace(/\.?0+$/, '');
+        }
+        if (vials > 0 && !grossPv && appKg > 0) {
+          grossPv = (appKg / vials).toFixed(7).replace(/\.?0+$/, '');
+        }
+        return {
+          id: p.id,
+          product_name: p.product_name,
+          product_type: p.product_type,
+          approved_vials: p.approved_vials ? p.approved_vials.toString() : '',
+          approved_quantity: p.approved_quantity.toString(),
+          unit: p.unit || 'kg',
+          wastage_quantity: p.wastage_quantity ? p.wastage_quantity.toString() : '',
+          wastage_percentage: p.wastage_percentage ? p.wastage_percentage.toString() : '5.00',
+          net_obligation_quantity: p.net_obligation_quantity ? p.net_obligation_quantity.toString() : '',
+          content_per_vial_net: netPv,
+          content_per_vial_gross: grossPv,
+          obligation_period_months: p.obligation_period_months ? p.obligation_period_months.toString() : '18'
+        };
+      })
+    : [
+        {
+          product_name: '',
+          product_type: 'Raw Material / API',
+          approved_vials: '',
+          approved_quantity: '',
+          unit: 'kg',
+          wastage_quantity: '',
+          wastage_percentage: '5.00',
+          net_obligation_quantity: '',
+          content_per_vial_net: '',
+          content_per_vial_gross: '',
+          obligation_period_months: '18'
+        }
+      ];
 
-  const [licenceFile, setLicenceFile] = useState<File | null>(null);
-
-  const [products, setProducts] = useState<ProductFormRow[]>([
-    {
-      product_name: '',
-      product_type: 'Raw Material / API',
-      approved_vials: '',
-      approved_quantity: '',
-      unit: 'kg',
-      wastage_quantity: '',
-      wastage_percentage: '5.00',
-      net_obligation_quantity: '',
-      content_per_vial_net: '',
-      content_per_vial_gross: '',
-      obligation_period_months: '18'
-    }
-  ]);
-
+  const [products, setProducts] = useState<EditProductFormRow[]>(initialProducts);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,7 +113,7 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
     setProducts(products.filter((_, i) => i !== index));
   };
 
-  const handleProductChange = (index: number, field: keyof ProductFormRow, value: string) => {
+  const handleProductChange = (index: number, field: keyof EditProductFormRow, value: string) => {
     const updated = [...products];
     updated[index] = { ...updated[index], [field]: value };
 
@@ -141,7 +171,7 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
       }
     }
 
-    // Automatically recalculate per-vial content
+    // Auto-recalculate per-vial content
     const vials = parseFloat(updated[index].approved_vials) || 0;
     const currentApproved = parseFloat(updated[index].approved_quantity) || 0;
     const currentNet = parseFloat(updated[index].net_obligation_quantity) || 0;
@@ -163,7 +193,7 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!licenceNumber.trim()) {
-      setError('Please enter a valid Licence Number.');
+      setError('Licence number cannot be empty.');
       return;
     }
 
@@ -196,6 +226,7 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
         const grossPv = parseFloat(p.content_per_vial_gross) || (vials && approved > 0 ? parseFloat((approved / vials).toFixed(7)) : undefined);
 
         return {
+          id: p.id,
           product_name: p.product_name.trim(),
           product_type: p.product_type as any,
           approved_quantity: approved,
@@ -212,33 +243,23 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
         };
       });
 
-      const created = await api.createLicence({
-        licence_number: licenceNumber.trim(),
-        issue_date: issueDate,
-        import_validity_date: importValidity,
-        export_validity_date: exportValidity,
-        products: payloadProducts
-      });
+      await api.updateLicence(
+        licence.id,
+        {
+          licence_number: licenceNumber.trim(),
+          issue_date: issueDate,
+          import_validity_date: importValidity,
+          export_validity_date: exportValidity,
+          status,
+          products: payloadProducts
+        },
+        password
+      );
 
-      // If user provided a licence PDF file, upload it immediately
-      if (licenceFile && created && created.id) {
-        try {
-          const formData = new FormData();
-          formData.append('file', licenceFile);
-          formData.append('document_type', 'Licence');
-          formData.append('licence_id', created.id);
-          formData.append('uploaded_by', 'DGFT Liaison Executive');
-          await api.uploadDocument(formData);
-        } catch (uploadErr) {
-          console.warn('Licence PDF upload failed:', uploadErr);
-        }
-      }
-
-      window.dispatchEvent(new Event('tcms-data-updated'));
       onSuccess();
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Failed to create licence.');
+      setError(err.message || 'Failed to update licence.');
     } finally {
       setLoading(false);
     }
@@ -249,12 +270,12 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-md bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-700">
-              <Award className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-md bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700">
+              <Edit3 className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-semibold text-slate-900 text-sm">Create Advance Authorisation Licence</h3>
-              <p className="text-xs text-slate-500">Inject Care Master Compliance Record</p>
+              <h3 className="font-semibold text-slate-900 text-sm">Edit Advance Authorisation Licence</h3>
+              <p className="text-xs text-slate-500">Password Protected Admin Modification Gate</p>
             </div>
           </div>
           <button
@@ -274,10 +295,10 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
             </div>
           )}
 
-          {/* Section: Licence Header Info */}
+          {/* Master Details */}
           <div>
             <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Licence Master Details</h4>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
                   Licence Number <span className="text-rose-500">*</span>
@@ -286,8 +307,7 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
                   type="text"
                   value={licenceNumber}
                   onChange={(e) => setLicenceNumber(e.target.value)}
-                  placeholder="e.g. AA/0310894521/2025"
-                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-teal-600 focus:border-teal-600 outline-none uppercase font-mono"
+                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-teal-600 outline-none uppercase font-mono"
                   required
                 />
               </div>
@@ -300,74 +320,71 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
                   type="date"
                   value={issueDate}
                   onChange={(e) => setIssueDate(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-teal-600 focus:border-teal-600 outline-none"
+                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-teal-600 outline-none"
                   required
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Import Validity Date <span className="text-rose-500">*</span>
+                  Import Validity <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="date"
                   value={importValidity}
                   onChange={(e) => setImportValidity(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-teal-600 focus:border-teal-600 outline-none"
+                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-teal-600 outline-none"
                   required
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Export Validity Date <span className="text-rose-500">*</span>
+                  Export Validity <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="date"
                   value={exportValidity}
                   onChange={(e) => setExportValidity(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-teal-600 focus:border-teal-600 outline-none"
+                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-teal-600 outline-none"
                   required
                 />
               </div>
-            </div>
 
-            {/* Upload PDF */}
-            <div className="mt-4 p-3 bg-slate-50 border border-slate-200 rounded-lg">
-              <label className="block text-xs font-medium text-slate-700 mb-1">
-                Attach Official Licence PDF (DGFT Copy)
-              </label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="file"
-                  accept=".pdf"
-                  onChange={(e) => setLicenceFile(e.target.files?.[0] || null)}
-                  className="text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
-                />
-                {licenceFile && (
-                  <span className="text-xs text-emerald-600 font-medium">✓ {licenceFile.name} ready</span>
-                )}
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Status
+                </label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as any)}
+                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-1 focus:ring-teal-600 outline-none font-medium"
+                >
+                  <option value="Active">Active</option>
+                  <option value="Expiring Soon">Expiring Soon</option>
+                  <option value="Expired">Expired</option>
+                  <option value="Fulfilled">Fulfilled</option>
+                  <option value="Surrendered">Surrendered</option>
+                </select>
               </div>
             </div>
           </div>
 
-          {/* Section: Product Lines */}
+          {/* Product Lines */}
           <div>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
               <div>
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Approved Product Lines</h4>
-                <p className="text-[11px] text-slate-400">Configure multiple raw materials, APIs, or packaging products approved under this licence.</p>
+                <p className="text-[11px] text-slate-400">Modify approved raw materials, vials count, per-vial content, or wastage allowance.</p>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleAddProduct}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-md text-xs font-medium transition-colors cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add Product Line</span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleAddProduct}
+                className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-md text-xs font-medium transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Product Line</span>
+              </button>
             </div>
 
             <div className="space-y-3">
@@ -396,7 +413,7 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
                         type="text"
                         value={p.product_name}
                         onChange={(e) => handleProductChange(idx, 'product_name', e.target.value)}
-                        placeholder="e.g. Amoxicillin Sterile Dry Powder"
+                        placeholder="e.g. Amoxicillin Sterile API"
                         className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-md bg-white outline-none focus:ring-1 focus:ring-teal-600"
                         required
                       />
@@ -438,7 +455,7 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 pt-1">
-                    {/* Approved Quantity in Vials (Requested: Before Approved Quantity in kg) */}
+                    {/* Approved Quantity in Vials */}
                     <div className="bg-sky-50/50 p-2 rounded-lg border border-sky-200">
                       <div className="flex items-center justify-between mb-1">
                         <label className="block text-[11px] font-semibold text-sky-900">
@@ -461,14 +478,6 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
                           >
                             50L
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => handleProductChange(idx, 'approved_vials', '2500000')}
-                            className="px-1 py-0.5 text-[9px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded cursor-pointer"
-                            title="25 Lakhs (25,00,000 vials)"
-                          >
-                            25L
-                          </button>
                         </div>
                       </div>
                       <input
@@ -476,7 +485,7 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
                         step="any"
                         value={p.approved_vials}
                         onChange={(e) => handleProductChange(idx, 'approved_vials', e.target.value)}
-                        placeholder="e.g. 7500000 (75L)"
+                        placeholder="e.g. 7500000"
                         className="w-full text-xs px-2 py-1 border border-sky-300 rounded bg-white outline-none focus:ring-1 focus:ring-sky-600 font-mono font-semibold text-sky-950"
                       />
                       <span className="text-[10px] text-sky-700">Finished vials count</span>
@@ -603,7 +612,7 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-200/60 rounded-lg transition-colors"
+            className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
           >
             Cancel
           </button>
@@ -616,10 +625,13 @@ export const NewLicenceModal: React.FC<NewLicenceModalProps> = ({ onClose, onSuc
             {loading ? (
               <>
                 <div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                <span>Saving to Database...</span>
+                <span>Updating Licence...</span>
               </>
             ) : (
-              <span>Create Licence & Product Lines</span>
+              <>
+                <Save className="w-3.5 h-3.5" />
+                <span>Save Licence Changes</span>
+              </>
             )}
           </button>
         </div>

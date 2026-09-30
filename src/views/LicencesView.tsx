@@ -3,6 +3,8 @@ import { Licence, LicenceCalculations } from '../types/index.ts';
 import { api } from '../api/client.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
 import { AdminDeleteConfirmModal } from '../components/AdminDeleteConfirmModal.tsx';
+import { AdminAuthPromptModal } from '../components/AdminAuthPromptModal.tsx';
+import { EditLicenceModal } from '../components/EditLicenceModal.tsx';
 import { formatNumber } from '../utils/format.ts';
 import { 
   Award, 
@@ -13,7 +15,8 @@ import {
   ArrowDownRight, 
   ArrowUpRight, 
   Trash2,
-  FileText
+  FileText,
+  Edit3
 } from 'lucide-react';
 
 interface LicencesViewProps {
@@ -34,9 +37,19 @@ export const LicencesView: React.FC<LicencesViewProps> = ({
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; licence_number: string } | null>(null);
+  const [authPromptLicence, setAuthPromptLicence] = useState<Licence | null>(null);
+  const [editingLicence, setEditingLicence] = useState<Licence | null>(null);
+  const [verifiedPassword, setVerifiedPassword] = useState('');
 
   useEffect(() => {
     loadData();
+
+    // Listen for data mutations across modals/components to refresh view automatically
+    const handleDataUpdated = () => {
+      loadData();
+    };
+    window.addEventListener('tcms-data-updated', handleDataUpdated);
+    return () => window.removeEventListener('tcms-data-updated', handleDataUpdated);
   }, []);
 
   const loadData = async () => {
@@ -202,6 +215,14 @@ export const LicencesView: React.FC<LicencesViewProps> = ({
                           </button>
                           <button
                             type="button"
+                            onClick={() => setAuthPromptLicence(l)}
+                            className="p-1.5 text-amber-600 hover:bg-amber-50 rounded transition-colors cursor-pointer"
+                            title="Edit Licence (Requires Admin Password)"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => onOpenLicence(l.id)}
                             className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
                             title="View Full Master Details"
@@ -226,6 +247,34 @@ export const LicencesView: React.FC<LicencesViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Admin Password Gate for Editing */}
+      <AdminAuthPromptModal
+        isOpen={!!authPromptLicence}
+        onClose={() => setAuthPromptLicence(null)}
+        title="Admin Authorization: Edit Licence"
+        itemIdentifier={`Licence: ${authPromptLicence?.licence_number || ''}`}
+        onSuccess={(password) => {
+          if (authPromptLicence) {
+            setVerifiedPassword(password);
+            setEditingLicence(authPromptLicence);
+            setAuthPromptLicence(null);
+          }
+        }}
+      />
+
+      {/* Edit Licence Modal */}
+      {editingLicence && (
+        <EditLicenceModal
+          licence={editingLicence}
+          adminPassword={verifiedPassword}
+          onClose={() => setEditingLicence(null)}
+          onSuccess={() => {
+            setEditingLicence(null);
+            loadData();
+          }}
+        />
+      )}
 
       {/* Admin Protected Deletion Modal */}
       <AdminDeleteConfirmModal

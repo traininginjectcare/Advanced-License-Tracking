@@ -22,6 +22,9 @@ export interface LicenceProduct {
   product_name: string;
   product_type: ProductType;
   approved_quantity: number;
+  approved_vials?: number;
+  net_content_per_vial?: number;
+  gross_content_per_vial?: number;
   unit: string;
   wastage_percentage: number;
   wastage_quantity?: number;

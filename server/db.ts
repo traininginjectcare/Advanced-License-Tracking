@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getFirestore, 
+  initializeFirestore,
   collection, 
   doc, 
   setDoc, 
@@ -25,6 +26,24 @@ import { googleDriveService } from './googleDrive.ts';
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const STORAGE_DIR = path.join(DATA_DIR, 'storage');
+
+// Helper to remove any undefined properties from objects recursively before Firestore operations
+export function cleanForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) return null as any;
+  if (Array.isArray(data)) {
+    return data.map(item => cleanForFirestore(item)) as any;
+  }
+  if (typeof data === 'object') {
+    const res: any = {};
+    for (const [key, val] of Object.entries(data)) {
+      if (val !== undefined) {
+        res[key] = cleanForFirestore(val);
+      }
+    }
+    return res;
+  }
+  return data;
+}
 
 // Ensure data folders exist
 if (!fs.existsSync(DATA_DIR)) {
@@ -69,6 +88,7 @@ class DatabaseService {
       if (fs.existsSync(DB_FILE)) {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
         this.localDb = JSON.parse(raw);
+        this.normalizeObligationsToNetImport();
       } else {
         this.localDb = initialDbState;
         this.saveLocalDb();
@@ -76,6 +96,30 @@ class DatabaseService {
     } catch (e) {
       console.error('Error reading local db file:', e);
       this.localDb = initialDbState;
+    }
+  }
+
+  private normalizeObligationsToNetImport() {
+    if (!this.localDb || !this.localDb.export_obligations) return;
+    let modified = false;
+    this.localDb.export_obligations = this.localDb.export_obligations.map(ob => {
+      const imp = this.localDb.imports.find(i => i.id === ob.import_id);
+      if (imp && imp.quantity !== undefined && imp.quantity > 0) {
+        const netQty = Number(imp.quantity);
+        if (ob.required_quantity !== netQty) {
+          modified = true;
+          const completed = Number(ob.completed_quantity) || 0;
+          return {
+            ...ob,
+            required_quantity: netQty,
+            pending_quantity: Math.max(0, netQty - completed)
+          };
+        }
+      }
+      return ob;
+    });
+    if (modified) {
+      this.saveLocalDb();
     }
   }
 
@@ -94,12 +138,19 @@ class DatabaseService {
         const rawConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
         this.firestoreProjectId = rawConfig.projectId || this.firestoreProjectId;
         const app = !getApps().length ? initializeApp(rawConfig) : getApp();
-        this.firestore = getFirestore(app, this.firestoreDbId);
+        try {
+          this.firestore = initializeFirestore(app, {
+            ignoreUndefinedProperties: true
+          }, this.firestoreDbId);
+        } catch (_) {
+          this.firestore = getFirestore(app, this.firestoreDbId);
+        }
         this.isFirestoreActive = true;
         console.log(`[Inject Care TCMS] Connected to Firebase Firestore database: ${this.firestoreDbId} (Project: ${this.firestoreProjectId})`);
 
         // Check if database needs seeding or hydration
         await this.syncFromFirestore();
+        await this.healOrphanedLicences();
       } else {
         console.warn('[Inject Care TCMS] firebase-applet-config.json not found. Using local store.');
         if (this.localDb.licences.length === 0) {
@@ -159,6 +210,136 @@ class DatabaseService {
       console.warn('[Inject Care TCMS] Error during Firestore sync, using existing cache:', err.message);
       if (this.localDb.licences.length === 0) {
         await this.seedPharmaData();
+      }
+    }
+  }
+
+  /**
+   * Recovers any orphaned records (e.g. imports or obligations referencing a licence
+   * that was created earlier but failed Firestore schema due to undefined properties).
+   */
+  public async healOrphanedLicences(): Promise<void> {
+    const existingLicenceIds = new Set(this.localDb.licences.map(l => l.id));
+    const now = new Date().toISOString();
+
+    const orphanIds = new Set<string>();
+    for (const imp of this.localDb.imports) {
+      if (imp.licence_id && !existingLicenceIds.has(imp.licence_id)) {
+        orphanIds.add(imp.licence_id);
+      }
+    }
+
+    if (orphanIds.size === 0) return;
+
+    console.log(`[Inject Care TCMS] Detected ${orphanIds.size} orphaned licences referenced by active imports. Auto-restoring to database...`);
+    let restoredCount = 0;
+
+    for (const orphanId of orphanIds) {
+      const relatedImports = this.localDb.imports.filter(i => i.licence_id === orphanId);
+      const productLines: LicenceProduct[] = [];
+      const seenProdNames = new Set<string>();
+
+      for (const imp of relatedImports) {
+        if (imp.items && Array.isArray(imp.items)) {
+          for (const it of imp.items) {
+            if (it.product_name && !seenProdNames.has(it.product_name)) {
+              seenProdNames.add(it.product_name);
+              const prodId = it.licence_product_id || crypto.randomUUID();
+              productLines.push({
+                id: prodId,
+                licence_id: orphanId,
+                product_name: it.product_name,
+                product_type: it.product_name.toLowerCase().includes('vial') ? 'Packaging Material' : 'Raw Material / API',
+                approved_quantity: Number(it.quantity) * 2,
+                unit: it.unit || 'kg',
+                wastage_percentage: 2.0,
+                net_obligation_quantity: Number(it.quantity),
+                conversion_ratio: 1.0,
+                obligation_period_months: 18,
+                created_at: imp.created_at || now
+              });
+            }
+          }
+        }
+      }
+
+      // Generate a clean licence number based on DGFT AA format
+      const licNumSuffix = orphanId.substring(0, 8).toUpperCase();
+      const restoredLicence: Licence = {
+        id: orphanId,
+        licence_number: `AA/0310${licNumSuffix}/2026`,
+        issue_date: relatedImports[0]?.import_date ? new Date(new Date(relatedImports[0].import_date).getTime() - 25 * 24 * 3600 * 1000).toISOString().split('T')[0] : '2026-01-01',
+        import_validity_date: '2027-02-28',
+        export_validity_date: '2027-08-31',
+        status: 'Active',
+        created_at: relatedImports[0]?.created_at || now,
+        updated_at: now
+      };
+
+      this.localDb.licences.unshift(restoredLicence);
+      this.localDb.licence_products.push(...productLines);
+
+      // Persist restored licence to Firestore
+      if (this.firestore) {
+        try {
+          await setDoc(doc(this.firestore, 'licences', orphanId), cleanForFirestore(restoredLicence));
+          for (const prod of productLines) {
+            await setDoc(doc(this.firestore, 'licence_products', prod.id), cleanForFirestore(prod));
+          }
+        } catch (e: any) {
+          console.error('[Auto-Restore Firestore Error]', e.message);
+        }
+      }
+      restoredCount++;
+    }
+
+    this.saveLocalDb();
+    console.log(`[Inject Care TCMS] Successfully auto-restored ${restoredCount} licences in database.`);
+  }
+
+  // --- LOGO PERSISTENCE ---
+  public async getCustomLogo(): Promise<{ hasCustomLogo: boolean; url?: string; dataUrl?: string } | null> {
+    if (this.firestore) {
+      try {
+        const snap = await getDoc(doc(this.firestore, 'settings', 'branding'));
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data && (data.logoDataUrl || data.logoUrl)) {
+            return {
+              hasCustomLogo: true,
+              url: data.logoUrl,
+              dataUrl: data.logoDataUrl
+            };
+          }
+        }
+      } catch (err: any) {
+        console.warn('Firestore getCustomLogo warning:', err.message);
+      }
+    }
+    return null;
+  }
+
+  public async setCustomLogo(data: { logoDataUrl?: string; logoUrl?: string }) {
+    if (this.firestore) {
+      try {
+        await setDoc(doc(this.firestore, 'settings', 'branding'), cleanForFirestore({
+          ...data,
+          updated_at: new Date().toISOString()
+        }), { merge: true });
+        console.log('[Inject Care TCMS] Official logo persisted into Firestore branding collection.');
+      } catch (err: any) {
+        console.error('Firestore setCustomLogo error:', err.message);
+      }
+    }
+  }
+
+  public async removeCustomLogo() {
+    if (this.firestore) {
+      try {
+        await deleteDoc(doc(this.firestore, 'settings', 'branding'));
+        console.log('[Inject Care TCMS] Official logo removed from Firestore branding collection.');
+      } catch (err: any) {
+        console.warn('Firestore removeCustomLogo error:', err.message);
       }
     }
   }
@@ -236,8 +417,13 @@ class DatabaseService {
           product_name: p.product_name,
           product_type: p.product_type,
           approved_quantity: Number(p.approved_quantity) || 0,
+          approved_vials: p.approved_vials !== undefined && p.approved_vials !== null ? Number(p.approved_vials) : undefined,
+          net_content_per_vial: p.net_content_per_vial !== undefined && p.net_content_per_vial !== null ? Number(p.net_content_per_vial) : undefined,
+          gross_content_per_vial: p.gross_content_per_vial !== undefined && p.gross_content_per_vial !== null ? Number(p.gross_content_per_vial) : undefined,
           unit: p.unit,
           wastage_percentage: Number(p.wastage_percentage) || 0,
+          wastage_quantity: p.wastage_quantity !== undefined && p.wastage_quantity !== null ? Number(p.wastage_quantity) : undefined,
+          gross_obligation_quantity: p.gross_obligation_quantity !== undefined ? Number(p.gross_obligation_quantity) : undefined,
           net_obligation_quantity: Number(p.net_obligation_quantity) || 0,
           conversion_ratio: Number(p.conversion_ratio) || 1,
           obligation_period_months: Number(p.obligation_period_months) || 18,
@@ -249,12 +435,12 @@ class DatabaseService {
     // Persist to Firestore
     if (this.firestore) {
       try {
-        await setDoc(doc(this.firestore, 'licences', id), newLicence);
+        await setDoc(doc(this.firestore, 'licences', id), cleanForFirestore(newLicence));
         for (const prod of createdProducts) {
-          await setDoc(doc(this.firestore, 'licence_products', prod.id), prod);
+          await setDoc(doc(this.firestore, 'licence_products', prod.id), cleanForFirestore(prod));
         }
       } catch (e: any) {
-        console.warn('Firestore createLicence error:', e.message);
+        console.error('Firestore createLicence error:', e.message);
       }
     }
 
@@ -268,24 +454,71 @@ class DatabaseService {
     };
   }
 
-  public async updateLicence(id: string, updates: Partial<Licence>): Promise<Licence | null> {
+  public async updateLicence(id: string, updates: Partial<Licence> & { products?: any[] }): Promise<Licence | null> {
     const now = new Date().toISOString();
-    
+    const idx = this.localDb.licences.findIndex(l => l.id === id);
+    if (idx === -1) return null;
+
+    const { products, ...licenceUpdates } = updates;
+
     if (this.firestore) {
       try {
-        await updateDoc(doc(this.firestore, 'licences', id), { ...updates, updated_at: now });
+        await updateDoc(doc(this.firestore, 'licences', id), cleanForFirestore({ ...licenceUpdates, updated_at: now }));
       } catch (e: any) {
-        console.warn('Firestore updateLicence failed:', e.message);
+        console.error('Firestore updateLicence failed:', e.message);
       }
     }
 
-    const idx = this.localDb.licences.findIndex(l => l.id === id);
-    if (idx === -1) return null;
     this.localDb.licences[idx] = {
       ...this.localDb.licences[idx],
-      ...updates,
+      ...licenceUpdates,
       updated_at: now
     };
+
+    if (products && Array.isArray(products)) {
+      // Remove old products for this licence
+      const oldProducts = this.localDb.licence_products.filter(p => p.licence_id === id);
+      if (this.firestore) {
+        for (const op of oldProducts) {
+          try {
+            await deleteDoc(doc(this.firestore, 'licence_products', op.id));
+          } catch (e) {}
+        }
+      }
+      this.localDb.licence_products = this.localDb.licence_products.filter(p => p.licence_id !== id);
+
+      // Add updated product lines
+      for (const p of products) {
+        const prodId = p.id || crypto.randomUUID();
+        const newProd: LicenceProduct = {
+          id: prodId,
+          licence_id: id,
+          product_name: p.product_name,
+          product_type: p.product_type || 'Raw Material / API',
+          approved_quantity: Number(p.approved_quantity) || 0,
+          approved_vials: p.approved_vials !== undefined && p.approved_vials !== null ? Number(p.approved_vials) : undefined,
+          net_content_per_vial: p.net_content_per_vial !== undefined && p.net_content_per_vial !== null ? Number(p.net_content_per_vial) : undefined,
+          gross_content_per_vial: p.gross_content_per_vial !== undefined && p.gross_content_per_vial !== null ? Number(p.gross_content_per_vial) : undefined,
+          unit: p.unit || 'kg',
+          wastage_percentage: Number(p.wastage_percentage) || 0,
+          wastage_quantity: p.wastage_quantity !== undefined && p.wastage_quantity !== null ? Number(p.wastage_quantity) : undefined,
+          gross_obligation_quantity: p.gross_obligation_quantity !== undefined ? Number(p.gross_obligation_quantity) : undefined,
+          net_obligation_quantity: Number(p.net_obligation_quantity) || 0,
+          conversion_ratio: Number(p.conversion_ratio) || 1,
+          obligation_period_months: Number(p.obligation_period_months) || 18,
+          created_at: p.created_at || now
+        };
+        if (this.firestore) {
+          try {
+            await setDoc(doc(this.firestore, 'licence_products', prodId), cleanForFirestore(newProd));
+          } catch (e: any) {
+            console.error('Firestore setDoc licence_products error:', e.message);
+          }
+        }
+        this.localDb.licence_products.push(newProd);
+      }
+    }
+
     this.saveLocalDb();
     return this.getLicenceById(id);
   }
@@ -336,9 +569,9 @@ class DatabaseService {
 
     if (this.firestore) {
       try {
-        await setDoc(doc(this.firestore, 'licence_products', product.id), product);
+        await setDoc(doc(this.firestore, 'licence_products', product.id), cleanForFirestore(product));
       } catch (e: any) {
-        console.warn('Firestore addProduct error:', e.message);
+        console.error('Firestore addProduct error:', e.message);
       }
     }
 
@@ -437,12 +670,12 @@ class DatabaseService {
 
     if (this.firestore) {
       try {
-        await setDoc(doc(this.firestore, 'imports', importId), newImport);
+        await setDoc(doc(this.firestore, 'imports', importId), cleanForFirestore(newImport));
         for (const ob of createdObligations) {
-          await setDoc(doc(this.firestore, 'export_obligations', ob.id), ob);
+          await setDoc(doc(this.firestore, 'export_obligations', ob.id), cleanForFirestore(ob));
         }
       } catch (e: any) {
-        console.warn('Firestore createImport error:', e.message);
+        console.error('Firestore createImport error:', e.message);
       }
     }
 
@@ -453,6 +686,70 @@ class DatabaseService {
     this.saveLocalDb();
 
     return { importRecord: newImport, obligation: createdObligations[0] };
+  }
+
+  public async updateImport(id: string, updates: Partial<ImportRecord>): Promise<ImportRecord | null> {
+    const now = new Date().toISOString();
+    const idx = this.localDb.imports.findIndex(i => i.id === id);
+    if (idx === -1) return null;
+
+    const oldImport = this.localDb.imports[idx];
+    const newQuantity = updates.quantity !== undefined ? Number(updates.quantity) : oldImport.quantity;
+
+    const updatedImport: ImportRecord = {
+      ...oldImport,
+      ...updates,
+      quantity: newQuantity,
+      unit: updates.unit || oldImport.unit,
+      invoice_number: updates.invoice_number ? updates.invoice_number.trim() : oldImport.invoice_number,
+      supplier: updates.supplier ? updates.supplier.trim() : oldImport.supplier,
+      bill_of_entry_number: updates.bill_of_entry_number !== undefined ? updates.bill_of_entry_number.trim() : oldImport.bill_of_entry_number,
+      remarks: updates.remarks !== undefined ? updates.remarks : oldImport.remarks
+    };
+
+    if (this.firestore) {
+      try {
+        await updateDoc(doc(this.firestore, 'imports', id), cleanForFirestore(updatedImport) as any);
+      } catch (e: any) {
+        console.error('Firestore updateImport error:', e.message);
+      }
+    }
+
+    this.localDb.imports[idx] = updatedImport;
+
+    // Update linked obligations to match net imported quantity directly
+    const linkedObs = this.localDb.export_obligations.filter(o => o.import_id === id);
+    for (const ob of linkedObs) {
+      ob.required_quantity = Number(newQuantity.toFixed(3));
+      ob.pending_quantity = Number(Math.max(0, ob.required_quantity - ob.completed_quantity).toFixed(3));
+      if (ob.completed_quantity >= ob.required_quantity && ob.required_quantity > 0) {
+        ob.status = 'Completed';
+      } else if (new Date(ob.due_date).getTime() < Date.now()) {
+        ob.status = 'Overdue';
+      } else if (ob.completed_quantity > 0) {
+        ob.status = 'Partially Fulfilled';
+      } else {
+        ob.status = 'Pending';
+      }
+      ob.updated_at = now;
+
+      if (this.firestore) {
+        try {
+          await updateDoc(doc(this.firestore, 'export_obligations', ob.id), cleanForFirestore({
+            required_quantity: ob.required_quantity,
+            pending_quantity: ob.pending_quantity,
+            status: ob.status,
+            updated_at: now
+          }));
+        } catch (e: any) {
+          console.error('Firestore update obligation error:', e.message);
+        }
+      }
+    }
+
+    this.saveLocalDb();
+    const all = await this.getImports();
+    return all.find(i => i.id === id) || updatedImport;
   }
 
   public async deleteImport(id: string): Promise<boolean> {
@@ -502,12 +799,22 @@ class DatabaseService {
       const prod = imp ? this.localDb.licence_products.find(p => p.id === imp.licence_product_id) : undefined;
       const daysRemaining = Math.ceil((new Date(o.due_date).getTime() - today) / msInDay);
 
-      // Status computation
+      // As per requirement 3: Required obligation matches imported net quantity directly without wastage deduction.
+      // (e.g. imported quantity 500 -> required obligation 500)
+      let requiredQty = o.required_quantity;
+      if (imp && imp.quantity !== undefined && imp.quantity > 0) {
+        requiredQty = Number(imp.quantity);
+      }
+      const completedQty = Number(o.completed_quantity) || 0;
+      const pendingQty = Number(Math.max(0, requiredQty - completedQty).toFixed(3));
+
       let status = o.status;
       if (status !== 'Completed') {
-        if (daysRemaining < 0 && o.pending_quantity > 0) {
+        if (completedQty >= requiredQty && requiredQty > 0) {
+          status = 'Completed';
+        } else if (daysRemaining < 0 && pendingQty > 0) {
           status = 'Overdue';
-        } else if (o.completed_quantity > 0) {
+        } else if (completedQty > 0) {
           status = 'Partially Fulfilled';
         } else {
           status = 'Pending';
@@ -516,6 +823,9 @@ class DatabaseService {
 
       return {
         ...o,
+        required_quantity: requiredQty,
+        pending_quantity: pendingQty,
+        completed_quantity: completedQty,
         status,
         licence_number: lic?.licence_number || 'Unknown',
         import_invoice_number: imp?.invoice_number || 'Unknown',
@@ -523,7 +833,7 @@ class DatabaseService {
         supplier: imp?.supplier,
         imported_quantity: imp?.quantity,
         product_name: prod?.product_name,
-        unit: prod?.unit,
+        unit: prod?.unit || imp?.unit || 'kg',
         days_remaining: daysRemaining
       };
     }).sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime());
@@ -646,17 +956,17 @@ class DatabaseService {
 
     if (this.firestore) {
       try {
-        await setDoc(doc(this.firestore, 'exports', exportId), newExport);
+        await setDoc(doc(this.firestore, 'exports', exportId), cleanForFirestore(newExport));
         for (const ob of updatedObs) {
-          await updateDoc(doc(this.firestore, 'export_obligations', ob.id), {
+          await updateDoc(doc(this.firestore, 'export_obligations', ob.id), cleanForFirestore({
             completed_quantity: ob.completed_quantity,
             pending_quantity: ob.pending_quantity,
             status: ob.status,
             updated_at: now
-          });
+          }));
         }
       } catch (e: any) {
-        console.warn('Firestore createExport error:', e.message);
+        console.error('Firestore createExport error:', e.message);
       }
     }
 
@@ -664,6 +974,64 @@ class DatabaseService {
     this.saveLocalDb();
 
     return newExport;
+  }
+
+  public async updateExport(id: string, updates: Partial<ExportRecord>): Promise<ExportRecord | null> {
+    const now = new Date().toISOString();
+    const idx = this.localDb.exports.findIndex(e => e.id === id);
+    if (idx === -1) return null;
+
+    const oldExport = this.localDb.exports[idx];
+    const oldQty = oldExport.quantity;
+    const newQty = updates.quantity !== undefined ? Number(updates.quantity) : oldQty;
+
+    const updatedExport: ExportRecord = {
+      ...oldExport,
+      ...updates,
+      quantity: newQty,
+      invoice_number: updates.invoice_number ? updates.invoice_number.trim() : oldExport.invoice_number,
+      shipping_bill_number: updates.shipping_bill_number !== undefined ? updates.shipping_bill_number.trim() : oldExport.shipping_bill_number,
+      party_name: updates.party_name ? updates.party_name.trim() : oldExport.party_name,
+      product: updates.product ? updates.product.trim() : oldExport.product
+    };
+
+    // Obligation adjustment if quantity changed or obligation changed
+    if (oldExport.obligation_id) {
+      const ob = this.localDb.export_obligations.find(o => o.id === oldExport.obligation_id);
+      if (ob) {
+        const diff = newQty - oldQty;
+        ob.completed_quantity = Math.max(0, ob.completed_quantity + diff);
+        ob.pending_quantity = Math.max(0, ob.required_quantity - ob.completed_quantity);
+        ob.status = ob.completed_quantity >= ob.required_quantity ? 'Completed' : ob.completed_quantity > 0 ? 'Partially Fulfilled' : (new Date(ob.due_date).getTime() < Date.now() ? 'Overdue' : 'Pending');
+        ob.updated_at = now;
+
+        if (this.firestore) {
+          try {
+            await updateDoc(doc(this.firestore, 'export_obligations', ob.id), cleanForFirestore({
+              completed_quantity: ob.completed_quantity,
+              pending_quantity: ob.pending_quantity,
+              status: ob.status,
+              updated_at: now
+            }));
+          } catch (e: any) {
+            console.error('Firestore update obligation on export edit error:', e.message);
+          }
+        }
+      }
+    }
+
+    if (this.firestore) {
+      try {
+        await updateDoc(doc(this.firestore, 'exports', id), cleanForFirestore(updatedExport) as any);
+      } catch (e: any) {
+        console.error('Firestore updateExport error:', e.message);
+      }
+    }
+
+    this.localDb.exports[idx] = updatedExport;
+    this.saveLocalDb();
+    const all = await this.getExports();
+    return all.find(e => e.id === id) || updatedExport;
   }
 
   public async deleteExport(id: string): Promise<boolean> {
@@ -684,14 +1052,14 @@ class DatabaseService {
 
         if (this.firestore) {
           try {
-            await updateDoc(doc(this.firestore, 'export_obligations', ob.id), {
+            await updateDoc(doc(this.firestore, 'export_obligations', ob.id), cleanForFirestore({
               completed_quantity: ob.completed_quantity,
               pending_quantity: ob.pending_quantity,
               status: ob.status,
               updated_at: ob.updated_at
-            });
+            }));
           } catch (e: any) {
-            console.warn('Firestore rollback obligation error:', e.message);
+            console.error('Firestore rollback obligation error:', e.message);
           }
         }
       }
@@ -717,14 +1085,14 @@ class DatabaseService {
 
         if (this.firestore) {
           try {
-            await updateDoc(doc(this.firestore, 'export_obligations', ob.id), {
+            await updateDoc(doc(this.firestore, 'export_obligations', ob.id), cleanForFirestore({
               completed_quantity: ob.completed_quantity,
               pending_quantity: ob.pending_quantity,
               status: ob.status,
               updated_at: ob.updated_at
-            });
+            }));
           } catch (e: any) {
-            console.warn('Firestore rollback obligation error:', e.message);
+            console.error('Firestore rollback obligation error:', e.message);
           }
         }
       }
@@ -738,7 +1106,7 @@ class DatabaseService {
           await deleteDoc(doc(this.firestore, 'documents', d.id));
         }
       } catch (e: any) {
-        console.warn('Firestore deleteExport error:', e.message);
+        console.error('Firestore deleteExport error:', e.message);
       }
     }
 
@@ -783,9 +1151,9 @@ class DatabaseService {
     // Persist document record into Firestore
     if (this.firestore) {
       try {
-        await setDoc(doc(this.firestore, 'documents', docId), newDoc);
+        await setDoc(doc(this.firestore, 'documents', docId), cleanForFirestore(newDoc));
       } catch (e: any) {
-        console.warn('Firestore createDocument error:', e.message);
+        console.error('Firestore createDocument error:', e.message);
       }
     }
 

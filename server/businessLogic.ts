@@ -102,17 +102,9 @@ export function computeObligationForImport(
 ): { requiredQuantity: number; dueDate: string } {
   const conversionRatio = product.conversion_ratio || 1;
   
-  let requiredQuantity = 0;
-  if (product.approved_quantity > 0 && product.net_obligation_quantity > 0) {
-    const ratio = product.net_obligation_quantity / product.approved_quantity;
-    requiredQuantity = importQty * ratio;
-  } else if (product.approved_quantity > 0 && product.wastage_quantity !== undefined && product.wastage_quantity > 0) {
-    const netQty = Math.max(0, product.approved_quantity - product.wastage_quantity);
-    const ratio = netQty / product.approved_quantity;
-    requiredQuantity = importQty * ratio;
-  } else {
-    requiredQuantity = importQty * conversionRatio;
-  }
+  // As required: Net obligation matches imported quantity directly without wastage deduction.
+  // Wastage is accounted for separately. (e.g. 500 imported -> 500 required obligation).
+  const requiredQuantity = importQty * conversionRatio;
 
   // Calculate due date: default 18 months from import date or product.obligation_period_months
   const date = new Date(importDate);

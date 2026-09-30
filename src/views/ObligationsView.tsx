@@ -31,6 +31,12 @@ export const ObligationsView: React.FC<ObligationsViewProps> = ({
 
   useEffect(() => {
     loadData();
+
+    const handleDataUpdated = () => {
+      loadData();
+    };
+    window.addEventListener('tcms-data-updated', handleDataUpdated);
+    return () => window.removeEventListener('tcms-data-updated', handleDataUpdated);
   }, []);
 
   const loadData = async () => {

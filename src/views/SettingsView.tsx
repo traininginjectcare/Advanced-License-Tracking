@@ -14,13 +14,20 @@ import {
   LogOut,
   ExternalLink,
   Upload,
-  Image as ImageIcon
+  Image as ImageIcon,
+  AlertTriangle,
+  Globe,
+  Sparkles,
+  ArrowRight
 } from 'lucide-react';
 import { InjectCareLogo } from '../components/InjectCareLogo.tsx';
 import { UploadLogoModal } from '../components/UploadLogoModal.tsx';
 import { 
   auth, 
   signInWithGoogle, 
+  signInWithGoogleRedirect,
+  handleRedirectAuthResult,
+  signInQuickDemoUser,
   logoutUser, 
   signInInternalUser, 
   getCachedAccessToken,
@@ -44,8 +51,24 @@ export const SettingsView: React.FC = () => {
   const [email, setEmail] = useState('compliance@injectcare.com');
   const [password, setPassword] = useState('injectcare2025');
 
+  const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
+
   useEffect(() => {
     loadStatus();
+
+    // Check if user just returned from Google Redirect sign in
+    handleRedirectAuthResult()
+      .then((res) => {
+        if (res) {
+          setCurrentUser(res.user);
+          setHasGoogleDriveToken(!!res.accessToken);
+          setSeedResult(`Signed in as ${res.user.displayName || res.user.email} via Google Account.`);
+          loadStatus();
+        }
+      })
+      .catch((err) => {
+        console.warn('Redirect auth check notice:', err);
+      });
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
@@ -84,18 +107,27 @@ export const SettingsView: React.FC = () => {
     }
   };
 
-  const handleGoogleDriveSignIn = async () => {
+  const handleGoogleDriveSignIn = async (mode: 'popup' | 'redirect' = 'popup') => {
     setAuthLoading(true);
     setAuthError(null);
     try {
+      if (mode === 'redirect') {
+        await signInWithGoogleRedirect();
+        return;
+      }
       const { user, accessToken } = await signInWithGoogle();
       setCurrentUser(user);
-      setHasGoogleDriveToken(true);
+      setHasGoogleDriveToken(!!accessToken);
       setSeedResult(`Signed in as ${user.displayName || user.email}. Google Drive integration active!`);
       loadStatus();
     } catch (err: any) {
       console.error('Google Sign In error:', err);
-      setAuthError(err.message || 'Failed to sign in with Google');
+      const isPopupBlocked = err?.code === 'auth/popup-blocked' || err?.message?.toLowerCase().includes('popup-blocked');
+      if (isPopupBlocked) {
+        setAuthError('auth/popup-blocked');
+      } else {
+        setAuthError(err.message || 'Failed to sign in with Google');
+      }
     } finally {
       setAuthLoading(false);
     }
@@ -113,6 +145,27 @@ export const SettingsView: React.FC = () => {
       setAuthError(err.message || 'Internal login failed');
     } finally {
       setAuthLoading(false);
+    }
+  };
+
+  const handleQuickDemoSignIn = async () => {
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      const user = await signInQuickDemoUser();
+      setCurrentUser(user);
+      setSeedResult(`Demo Compliance Officer authenticated (${user.email || 'Session UID: ' + user.uid.substring(0, 6)}). Full access unlocked!`);
+      loadStatus();
+    } catch (err: any) {
+      setAuthError(err.message || 'Demo authentication failed');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleOpenInNewTab = () => {
+    if (typeof window !== 'undefined') {
+      window.open(window.location.href, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -336,45 +389,118 @@ export const SettingsView: React.FC = () => {
         </div>
 
         {authError && (
-          <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900 space-y-2">
-            <div className="flex items-center gap-2 font-bold text-rose-950">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-              <span>
-                {authError.includes('unauthorized-domain')
-                  ? 'Domain Not Authorized in Firebase'
-                  : 'Authentication Error'}
-              </span>
-            </div>
-            
-            {authError.includes('unauthorized-domain') ? (
-              <div className="text-xs text-rose-800 space-y-2 leading-relaxed">
-                <p>
-                  Firebase blocked the sign-in because your hosting domain (<strong className="font-mono bg-rose-100 px-1 py-0.5 rounded text-rose-950">{typeof window !== 'undefined' ? window.location.hostname : 'your-domain.onrender.com'}</strong>) is not yet listed under <strong>Authorized Domains</strong> in your Firebase project.
+          <div className="space-y-2">
+            {authError === 'auth/popup-blocked' || authError.includes('popup-blocked') ? (
+              <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 space-y-3 shadow-xs">
+                <div className="flex items-center gap-2 font-bold text-amber-900 text-sm">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Google Sign-In Pop-up Blocked by Browser</span>
+                </div>
+                <p className="text-amber-900 leading-relaxed text-xs">
+                  Your web browser automatically blocked the Google authentication pop-up window. This is normal browser security behavior inside preview iframes or when a pop-up blocker extension is active.
                 </p>
-                <div className="p-3 bg-white/80 border border-rose-200 rounded-lg space-y-1.5 text-[11px] text-slate-800">
-                  <div className="font-bold text-slate-900">How to fix this in 30 seconds:</div>
-                  <ol className="list-decimal list-inside space-y-1 text-slate-700">
-                    <li>
-                      Go to the Firebase Console:
-                      <a 
-                        href="https://console.firebase.google.com/project/gen-lang-client-0809712068/authentication/settings" 
-                        target="_blank" 
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 ml-1 text-blue-600 underline font-semibold hover:text-blue-800"
-                      >
-                        Firebase Auth Settings <ExternalLink className="w-3 h-3 inline" />
-                      </a>
-                    </li>
-                    <li>Click on the <strong>Settings</strong> tab, then select <strong>Authorized domains</strong>.</li>
-                    <li>
-                      Click <strong>Add domain</strong> and paste: <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-bold text-slate-900">{typeof window !== 'undefined' ? window.location.hostname : 'your-app.onrender.com'}</code>
-                    </li>
-                    <li>Click <strong>Save</strong> and refresh this page.</li>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleGoogleDriveSignIn('popup')}
+                    disabled={authLoading}
+                    className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>Retry with Direct Click</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleGoogleDriveSignIn('redirect')}
+                    disabled={authLoading}
+                    className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>Sign in via Redirect (No Pop-up)</span>
+                  </button>
+                </div>
+
+                {isInIframe && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={handleOpenInNewTab}
+                      className="w-full py-1.5 px-3 bg-white border border-amber-300 hover:bg-amber-100/70 text-amber-900 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Open App in Full Browser Tab (Avoids Iframe Restrictions)</span>
+                    </button>
+                  </div>
+                )}
+
+                <div className="p-2.5 bg-white/90 border border-amber-200 rounded-lg text-[11px] text-slate-700 space-y-1">
+                  <span className="font-semibold text-slate-900">How to allow pop-ups in your browser:</span>
+                  <ol className="list-decimal list-inside space-y-0.5 text-slate-600">
+                    <li>Look for the <strong>Pop-up blocked icon</strong> (with red cross) in your browser address bar (top right).</li>
+                    <li>Click it and choose <strong>"Always allow pop-ups and redirects from this site"</strong>.</li>
+                    <li>Click the <strong>Retry with Direct Click</strong> button above.</li>
                   </ol>
+                </div>
+
+                <div className="pt-1.5 border-t border-amber-200/80 flex items-center justify-between">
+                  <span className="text-[11px] text-amber-800">Need instant access without pop-ups?</span>
+                  <button
+                    type="button"
+                    onClick={handleQuickDemoSignIn}
+                    disabled={authLoading}
+                    className="py-1 px-2.5 bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-semibold rounded flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                  >
+                    <Sparkles className="w-3 h-3 text-amber-400" />
+                    <span>1-Click Internal Staff Login</span>
+                  </button>
+                </div>
+              </div>
+            ) : authError.includes('unauthorized-domain') ? (
+              <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-rose-950">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>Domain Not Authorized in Firebase</span>
+                </div>
+                <div className="text-xs text-rose-800 space-y-2 leading-relaxed">
+                  <p>
+                    Firebase blocked the sign-in because your hosting domain (<strong className="font-mono bg-rose-100 px-1 py-0.5 rounded text-rose-950">{typeof window !== 'undefined' ? window.location.hostname : 'your-domain.onrender.com'}</strong>) is not yet listed under <strong>Authorized Domains</strong> in your Firebase project.
+                  </p>
+                  <div className="p-3 bg-white/80 border border-rose-200 rounded-lg space-y-1.5 text-[11px] text-slate-800">
+                    <div className="font-bold text-slate-900">How to fix this in 30 seconds:</div>
+                    <ol className="list-decimal list-inside space-y-1 text-slate-700">
+                      <li>
+                        Go to the Firebase Console:
+                        <a 
+                          href="https://console.firebase.google.com/project/gen-lang-client-0809712068/authentication/settings" 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 ml-1 text-blue-600 underline font-semibold hover:text-blue-800"
+                        >
+                          Firebase Auth Settings <ExternalLink className="w-3 h-3 inline" />
+                        </a>
+                      </li>
+                      <li>Click on the <strong>Settings</strong> tab, then select <strong>Authorized domains</strong>.</li>
+                      <li>
+                        Click <strong>Add domain</strong> and paste: <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-bold text-slate-900">{typeof window !== 'undefined' ? window.location.hostname : 'your-app.onrender.com'}</code>
+                      </li>
+                      <li>Click <strong>Save</strong> and refresh this page.</li>
+                    </ol>
+                  </div>
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-rose-800">{authError}</p>
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 flex items-center justify-between">
+                <span>{authError}</span>
+                <button
+                  type="button"
+                  onClick={() => setAuthError(null)}
+                  className="text-xs font-semibold text-rose-600 hover:text-rose-800 ml-2"
+                >
+                  Dismiss
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -385,21 +511,32 @@ export const SettingsView: React.FC = () => {
               <div className="text-slate-500">Authenticated Account:</div>
               <div className="font-semibold text-slate-900">{currentUser.email || currentUser.displayName || currentUser.uid}</div>
               <div className="text-[11px] text-slate-500">
-                Google Drive Scope: {hasGoogleDriveToken ? 'Active & Authorized (Drive file permissions granted)' : 'Standard Session'}
+                Google Drive Scope: {hasGoogleDriveToken ? 'Active & Authorized (Drive file permissions granted)' : 'Standard Session (Local / Firestore Drive Storage)'}
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               {!hasGoogleDriveToken && (
-                <button
-                  type="button"
-                  onClick={handleGoogleDriveSignIn}
-                  disabled={authLoading}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-2 cursor-pointer shadow-xs"
-                >
-                  <LogIn className="w-4 h-4" />
-                  <span>Authorize Google Drive</span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => handleGoogleDriveSignIn('popup')}
+                    disabled={authLoading}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-2 cursor-pointer shadow-xs"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    <span>Authorize Google Drive (Pop-up)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleGoogleDriveSignIn('redirect')}
+                    disabled={authLoading}
+                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>Authorize via Redirect</span>
+                  </button>
+                </>
               )}
               <button
                 type="button"
@@ -415,30 +552,57 @@ export const SettingsView: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
             {/* Google Drive Auth Option */}
             <div className="p-4 border border-blue-200 rounded-xl bg-blue-50/50 space-y-3 flex flex-col justify-between">
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <div className="font-semibold text-slate-900 text-xs flex items-center gap-1.5">
                   <KeyRound className="w-4 h-4 text-blue-600" />
                   <span>Sign in with Google Workspace</span>
                 </div>
-                <p className="text-[11px] text-slate-600">
+                <p className="text-[11px] text-slate-600 leading-relaxed">
                   Connect your Google account to authorize document uploads directly to Inject Care's Google Drive folders.
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={handleGoogleDriveSignIn}
-                disabled={authLoading}
-                className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-colors"
-              >
-                <LogIn className="w-4 h-4" />
-                <span>{authLoading ? 'Signing In...' : 'Sign In with Google Drive'}</span>
-              </button>
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleGoogleDriveSignIn('popup')}
+                  disabled={authLoading}
+                  className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-colors"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>{authLoading ? 'Signing In...' : 'Sign In with Google (Pop-up)'}</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleGoogleDriveSignIn('redirect')}
+                    disabled={authLoading}
+                    className="flex-1 py-1.5 px-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-[11px] font-medium rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <Globe className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Redirect Mode</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleQuickDemoSignIn}
+                    disabled={authLoading}
+                    className="flex-1 py-1.5 px-2 bg-slate-900 hover:bg-black text-amber-300 text-[11px] font-medium rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Quick Staff Demo</span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Internal Email/Password Option */}
             <form onSubmit={handleInternalSignIn} className="p-4 border border-slate-200 rounded-xl bg-slate-50/70 space-y-3">
-              <div className="font-semibold text-slate-900 text-xs">Internal Staff Sign-In</div>
+              <div className="flex items-center justify-between">
+                <div className="font-semibold text-slate-900 text-xs">Internal Staff Sign-In</div>
+                <span className="text-[10px] text-slate-400">Offline / Standalone</span>
+              </div>
               <div className="space-y-2">
                 <input
                   type="email"
@@ -455,13 +619,23 @@ export const SettingsView: React.FC = () => {
                   className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded focus:ring-1 focus:ring-teal-700"
                 />
               </div>
-              <button
-                type="submit"
-                disabled={authLoading}
-                className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-900 text-white text-xs font-medium rounded cursor-pointer transition-colors"
-              >
-                {authLoading ? 'Authenticating...' : 'Internal Sign In'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={authLoading}
+                  className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-900 text-white text-xs font-medium rounded cursor-pointer transition-colors"
+                >
+                  {authLoading ? 'Authenticating...' : 'Internal Sign In'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleQuickDemoSignIn}
+                  disabled={authLoading}
+                  className="py-2 px-3 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-xs font-medium rounded cursor-pointer transition-colors"
+                >
+                  Demo Fill
+                </button>
+              </div>
             </form>
           </div>
         )}

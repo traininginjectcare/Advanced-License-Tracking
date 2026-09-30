@@ -3,6 +3,8 @@ import { ExportRecord, TransactionDocumentChecklist } from '../types/index.ts';
 import { api } from '../api/client.ts';
 import { DocumentChecklistBadge } from '../components/DocumentChecklistBadge.tsx';
 import { AdminDeleteConfirmModal } from '../components/AdminDeleteConfirmModal.tsx';
+import { AdminAuthPromptModal } from '../components/AdminAuthPromptModal.tsx';
+import { EditExportModal } from '../components/EditExportModal.tsx';
 import { formatNumber } from '../utils/format.ts';
 import { 
   ArrowUpRight, 
@@ -12,7 +14,8 @@ import {
   FileText,
   ExternalLink,
   X,
-  Building2
+  Building2,
+  Edit3
 } from 'lucide-react';
 
 interface ExportsViewProps {
@@ -39,6 +42,9 @@ export const ExportsView: React.FC<ExportsViewProps> = ({
   const [search, setSearch] = useState(initialSearch);
   const [typeFilter, setTypeFilter] = useState('All');
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; invoice: string; licence_number?: string } | null>(null);
+  const [authPromptExport, setAuthPromptExport] = useState<ExportRecord | null>(null);
+  const [editingExport, setEditingExport] = useState<ExportRecord | null>(null);
+  const [verifiedPassword, setVerifiedPassword] = useState('');
 
   useEffect(() => {
     if (initialSearch !== undefined) {
@@ -48,6 +54,12 @@ export const ExportsView: React.FC<ExportsViewProps> = ({
 
   useEffect(() => {
     loadData();
+
+    const handleDataUpdated = () => {
+      loadData();
+    };
+    window.addEventListener('tcms-data-updated', handleDataUpdated);
+    return () => window.removeEventListener('tcms-data-updated', handleDataUpdated);
   }, []);
 
   const loadData = async () => {
@@ -296,6 +308,14 @@ export const ExportsView: React.FC<ExportsViewProps> = ({
                         )}
                         <button
                           type="button"
+                          onClick={() => setAuthPromptExport(exp)}
+                          className="p-1 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded cursor-pointer"
+                          title="Edit Export Shipment (Requires Admin Password)"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => onOpenLicence(exp.licence_id)}
                           className="p-1 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded cursor-pointer"
                           title="Open Master Licence"
@@ -319,6 +339,34 @@ export const ExportsView: React.FC<ExportsViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Admin Password Gate for Editing */}
+      <AdminAuthPromptModal
+        isOpen={!!authPromptExport}
+        onClose={() => setAuthPromptExport(null)}
+        title="Admin Authorization: Edit Export Shipment"
+        itemIdentifier={`Invoice: ${authPromptExport?.invoice_number || ''}`}
+        onSuccess={(password) => {
+          if (authPromptExport) {
+            setVerifiedPassword(password);
+            setEditingExport(authPromptExport);
+            setAuthPromptExport(null);
+          }
+        }}
+      />
+
+      {/* Edit Export Modal */}
+      {editingExport && (
+        <EditExportModal
+          exportRecord={editingExport}
+          adminPassword={verifiedPassword}
+          onClose={() => setEditingExport(null)}
+          onSuccess={() => {
+            setEditingExport(null);
+            loadData();
+          }}
+        />
+      )}
 
       {/* Admin Protected Deletion Modal */}
       <AdminDeleteConfirmModal

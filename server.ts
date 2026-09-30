@@ -239,6 +239,9 @@ async function startServer() {
 
   app.put('/api/licences/:id', async (req, res) => {
     try {
+      if (!checkAdminPassword(req)) {
+        return res.status(403).json({ success: false, error: 'Admin Authorization Required: Invalid secret password. Licence editing blocked.' });
+      }
       const updated = await dbService.updateLicence(req.params.id, req.body);
       if (!updated) return res.status(404).json({ success: false, error: 'Licence not found' });
       res.json({ success: true, licence: updated });
@@ -459,6 +462,19 @@ async function startServer() {
     }
   });
 
+  app.put('/api/imports/:id', async (req, res) => {
+    try {
+      if (!checkAdminPassword(req)) {
+        return res.status(403).json({ success: false, error: 'Admin Authorization Required: Invalid secret password. Import editing blocked.' });
+      }
+      const updated = await dbService.updateImport(req.params.id, req.body);
+      if (!updated) return res.status(404).json({ success: false, error: 'Import record not found' });
+      res.json({ success: true, import: updated, message: 'Import updated successfully.' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.delete('/api/imports/:id', async (req, res) => {
     try {
       if (!checkAdminPassword(req)) {
@@ -663,6 +679,19 @@ async function startServer() {
         export: createdExport,
         message: 'Export logged successfully. Obligation balance updated.'
       });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.put('/api/exports/:id', async (req, res) => {
+    try {
+      if (!checkAdminPassword(req)) {
+        return res.status(403).json({ success: false, error: 'Admin Authorization Required: Invalid secret password. Export editing blocked.' });
+      }
+      const updated = await dbService.updateExport(req.params.id, req.body);
+      if (!updated) return res.status(404).json({ success: false, error: 'Export record not found' });
+      res.json({ success: true, export: updated, message: 'Export updated successfully.' });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -1032,8 +1061,15 @@ async function startServer() {
   });
 
   // --- OFFICIAL LOGO MANAGEMENT ---
-  app.get('/api/logo', (req, res) => {
+  app.get('/api/logo', async (req, res) => {
     try {
+      // 1. Check if Firestore has a custom logo stored (persists permanently across Render restarts & all client machines)
+      const firestoreLogo = await dbService.getCustomLogo();
+      if (firestoreLogo && firestoreLogo.hasCustomLogo && (firestoreLogo.dataUrl || firestoreLogo.url)) {
+        return res.json({ hasCustomLogo: true, url: firestoreLogo.dataUrl || firestoreLogo.url });
+      }
+
+      // 2. Check local public directory
       const publicDir = path.join(process.cwd(), 'public');
       const files = [
         'injectcare-custom-logo.png',
@@ -1043,8 +1079,19 @@ async function startServer() {
         'injectcare-custom-logo.webp'
       ];
       for (const file of files) {
-        if (fs.existsSync(path.join(publicDir, file))) {
-          return res.json({ hasCustomLogo: true, url: `/${file}?t=${Date.now()}` });
+        const filePath = path.join(publicDir, file);
+        if (fs.existsSync(filePath)) {
+          try {
+            const buffer = fs.readFileSync(filePath);
+            const ext = file.split('.').pop()?.toLowerCase();
+            const mime = ext === 'svg' ? 'image/svg+xml' : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
+            const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+            // Persist to Firestore so other computers and server restarts get it immediately
+            await dbService.setCustomLogo({ logoDataUrl: dataUrl, logoUrl: `/${file}` });
+            return res.json({ hasCustomLogo: true, url: dataUrl });
+          } catch (_) {
+            return res.json({ hasCustomLogo: true, url: `/${file}?t=${Date.now()}` });
+          }
         }
       }
       res.json({ hasCustomLogo: false, url: '/injectcare-logo.svg' });
@@ -1053,7 +1100,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/upload-logo', upload.single('logo'), (req, res) => {
+  app.post('/api/upload-logo', upload.single('logo'), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ success: false, error: 'No logo file provided' });
@@ -1081,14 +1128,22 @@ async function startServer() {
       const filename = `injectcare-custom-logo.${ext}`;
       fs.writeFileSync(path.join(publicDir, filename), req.file.buffer);
 
-      const logoUrl = `/${filename}?t=${Date.now()}`;
-      res.json({ success: true, url: logoUrl });
+      const mime = req.file.mimetype || (ext === 'svg' ? 'image/svg+xml' : `image/${ext}`);
+      const base64Data = `data:${mime};base64,${req.file.buffer.toString('base64')}`;
+
+      // Persist directly into Firestore branding collection so all client machines and server reboots preserve the logo
+      await dbService.setCustomLogo({
+        logoDataUrl: base64Data,
+        logoUrl: `/${filename}`
+      });
+
+      res.json({ success: true, url: base64Data });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
-  app.delete('/api/logo', (req, res) => {
+  app.delete('/api/logo', async (req, res) => {
     try {
       const publicDir = path.join(process.cwd(), 'public');
       const exts = ['png', 'svg', 'jpg', 'jpeg', 'webp'];
@@ -1096,6 +1151,7 @@ async function startServer() {
         const p = path.join(publicDir, `injectcare-custom-logo.${e}`);
         if (fs.existsSync(p)) fs.unlinkSync(p);
       }
+      await dbService.removeCustomLogo();
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -1111,6 +1167,9 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    const publicDir = path.join(process.cwd(), 'public');
+    // Ensure public assets (e.g. logos, icons) are served before catch-all
+    app.use(express.static(publicDir));
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
