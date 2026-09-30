@@ -354,7 +354,7 @@ export const api = {
       const res = await fetch('/api/logo');
       return await res.json();
     } catch {
-      return { hasCustomLogo: false, url: '/injectcare-logo.svg' };
+      return { hasCustomLogo: true, url: '/logo.png' };
     }
   },
 

@@ -1060,6 +1060,27 @@ async function startServer() {
     }
   });
 
+  // Explicit route for /logo.png to guarantee it is always served directly with proper image headers across all environments
+  app.get('/logo.png', (req, res, next) => {
+    const publicLogo = path.join(process.cwd(), 'public', 'logo.png');
+    if (fs.existsSync(publicLogo)) {
+      res.setHeader('Content-Type', 'image/png');
+      return res.sendFile(publicLogo);
+    }
+    const distLogo = path.join(process.cwd(), 'dist', 'logo.png');
+    if (fs.existsSync(distLogo)) {
+      res.setHeader('Content-Type', 'image/png');
+      return res.sendFile(distLogo);
+    }
+    // Graceful fallback to SVG if logo.png is not yet present
+    const svgPath = path.join(process.cwd(), 'public', 'injectcare-logo.svg');
+    if (fs.existsSync(svgPath)) {
+      res.setHeader('Content-Type', 'image/svg+xml');
+      return res.sendFile(svgPath);
+    }
+    next();
+  });
+
   // --- OFFICIAL LOGO MANAGEMENT ---
   app.get('/api/logo', async (req, res) => {
     try {
@@ -1069,9 +1090,14 @@ async function startServer() {
         return res.json({ hasCustomLogo: true, url: firestoreLogo.dataUrl || firestoreLogo.url });
       }
 
-      // 2. Check local public directory
+      // 2. Check local public directory for logo.png (added in GitHub repo) or other formats
       const publicDir = path.join(process.cwd(), 'public');
       const files = [
+        'logo.png',
+        'logo.svg',
+        'logo.jpg',
+        'logo.jpeg',
+        'logo.webp',
         'injectcare-custom-logo.png',
         'injectcare-custom-logo.svg',
         'injectcare-custom-logo.jpg',
@@ -1088,13 +1114,13 @@ async function startServer() {
             const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`;
             // Persist to Firestore so other computers and server restarts get it immediately
             await dbService.setCustomLogo({ logoDataUrl: dataUrl, logoUrl: `/${file}` });
-            return res.json({ hasCustomLogo: true, url: dataUrl });
+            return res.json({ hasCustomLogo: true, url: `/${file}` });
           } catch (_) {
             return res.json({ hasCustomLogo: true, url: `/${file}?t=${Date.now()}` });
           }
         }
       }
-      res.json({ hasCustomLogo: false, url: '/injectcare-logo.svg' });
+      res.json({ hasCustomLogo: true, url: '/logo.png' });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }

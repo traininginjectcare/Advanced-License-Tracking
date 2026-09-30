@@ -16,7 +16,8 @@ export const InjectCareLogo: React.FC<InjectCareLogoProps> = ({
   imgClassName = '',
   allowUpload = true
 }) => {
-  const [logoUrl, setLogoUrl] = useState<string>('/injectcare-logo.svg');
+  // Directly point to /logo.png added in the GitHub repo
+  const [logoUrl, setLogoUrl] = useState<string>('/logo.png');
   const [showUploadModal, setShowUploadModal] = useState(false);
 
   // Sync logo from server (Firestore) and sync to localStorage
@@ -37,12 +38,12 @@ export const InjectCareLogo: React.FC<InjectCareLogoProps> = ({
               localStorage.setItem('injectcare_custom_logo', res.url);
             } catch (_) {}
           } else if (!stored) {
-            setLogoUrl('/injectcare-logo.svg');
+            setLogoUrl('/logo.png');
           }
         })
         .catch(() => {
           if (!stored) {
-            setLogoUrl('/injectcare-logo.svg');
+            setLogoUrl('/logo.png');
           }
         });
     };
@@ -53,6 +54,11 @@ export const InjectCareLogo: React.FC<InjectCareLogoProps> = ({
     window.addEventListener('injectcare-logo-changed', updateLogo);
     return () => window.removeEventListener('injectcare-logo-changed', updateLogo);
   }, []);
+
+  const handleImageError = () => {
+    // If /logo.png fails to load on any device, fallback to SVG cleanly
+    setLogoUrl(prev => (prev !== '/injectcare-logo.svg' ? '/injectcare-logo.svg' : prev));
+  };
 
   if (variant === 'sidebar') {
     return (
@@ -66,7 +72,7 @@ export const InjectCareLogo: React.FC<InjectCareLogoProps> = ({
               className={`w-full max-h-20 h-auto object-contain select-none transition-transform duration-200 ${imgClassName}`}
               loading="eager"
               draggable={false}
-              onError={() => setLogoUrl('/injectcare-logo.svg')}
+              onError={handleImageError}
             />
 
             {/* Quick Upload Hover Overlay */}
@@ -109,7 +115,7 @@ export const InjectCareLogo: React.FC<InjectCareLogoProps> = ({
               className="h-full w-auto max-w-[180px] object-contain"
               loading="eager"
               draggable={false}
-              onError={() => setLogoUrl('/injectcare-logo.svg')}
+              onError={handleImageError}
             />
           </div>
         </div>
@@ -133,7 +139,7 @@ export const InjectCareLogo: React.FC<InjectCareLogoProps> = ({
         className={`object-contain ${className}`}
         loading="eager"
         draggable={false}
-        onError={() => setLogoUrl('/injectcare-logo.svg')}
+        onError={handleImageError}
       />
     );
   }
@@ -148,7 +154,7 @@ export const InjectCareLogo: React.FC<InjectCareLogoProps> = ({
           className={`w-full max-w-[280px] max-h-24 h-auto object-contain select-none ${imgClassName}`}
           loading="eager"
           draggable={false}
-          onError={() => setLogoUrl('/injectcare-logo.svg')}
+          onError={handleImageError}
         />
         {allowUpload && (
           <button
